@@ -6746,21 +6746,6 @@ for binfrm in ["\x00" * 15, b"\x00" * 17]:
 
 ############
 ############
-+ Netbios tests
-
-= NBNSQueryRequest - build
-
-z = NBNSQueryRequest(SUFFIX="file server service", QUESTION_NAME='TEST1', QUESTION_TYPE='NB')
-
-assert raw(z) == b'\x00\x00\x01\x10\x00\x01\x00\x00\x00\x00\x00\x00 FEEFFDFEDBCACACACACACACACACACACA\x00\x00 \x00\x01'
-
-pkt = IP(dst='192.168.0.255')/UDP(sport=137, dport='netbios_ns')/z
-pkt = IP(raw(pkt))
-assert pkt.QUESTION_NAME == b'TEST1          '
-
-
-############
-############
 + MGCP tests
 
 = MGCP - build
@@ -6982,15 +6967,6 @@ assert p.type == 8
 r = b'\x01\x00\x00\x1c0x10x20x30x40x50\x02\x08geheim'
 p = Radius(r)
 assert isinstance(p.attributes[0], RadiusAttr_User_Password)
-
-############
-############
-+ Skinny tests
-
-= Skinny - build & dissection
-p = raw(IP(src="127.0.0.1")/TCP()/Skinny(msg="ServiceURLStatMessage"))
-assert p == b'E\x00\x004\x00\x01\x00\x00@\x06|\xc1\x7f\x00\x00\x01\x7f\x00\x00\x01\x07\xd0\x07\xd0\x00\x00\x00\x00\x00\x00\x00\x00P\x02 \x00S3\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00/\x01\x00\x00'
-assert IP(p)[Skinny].msg == 303
 
 
 ############
