@@ -139,9 +139,10 @@ M = TypeVar('M')  # Machine storage
 @six.add_metaclass(Field_metaclass)
 class Field(Generic[I, M]):
     """
-    For more information on how this work, please refer to
-    http://www.secdev.org/projects/scapy/files/scapydoc.pdf
-    chapter ``Adding a New Field``
+    For more information on how this works, please refer to the
+    'Adding new protocols' chapter in the online documentation:
+
+    https://scapy.readthedocs.io/en/stable/build_dissect.html
     """
     __slots__ = [
         "name",
@@ -412,6 +413,11 @@ use.
         self.dflt = dflt
         self.default = None  # So that we can detect changes in defaults
         self.name = self.dflt.name
+        if any(x[0].name != self.name for x in self.flds):
+            warnings.warn(
+                "All fields should have the same name in a MultipleTypeField",
+                SyntaxWarning
+            )
 
     def _iterate_fields_cond(self, pkt, val, use_val):
         # type: (Optional[Packet], Any, bool) -> Field[Any, Any]

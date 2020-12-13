@@ -11,6 +11,12 @@ then
   # Linux
   OSTOX="linux"
   UT_FLAGS+=" -K tshark"
+  if [ ! -z "$GITHUB_ACTIONS" ]
+  then
+    # Due to a security policy, the firewall of the Azure runner
+    # (Standard_DS2_v2) that runs Github Actions on Linux blocks ICMP.
+    UT_FLAGS+=" -K icmp_firewall"
+  fi
   if [ -z "$SIMPLE_TESTS" ]
   then
     # check vcan
@@ -23,9 +29,9 @@ then
   else
     UT_FLAGS+=" -K vcan_socket"
   fi
-elif [ "$OSTYPE" = "darwin"* ] || [ "$TRAVIS_OS_NAME" = "osx" ]
+elif [[ "$OSTYPE" = "darwin"* ]] || [ "$TRAVIS_OS_NAME" = "osx" ]
 then
-  OSTOX="osx"
+  OSTOX="bsd"
   # Travis CI in macOS 10.13+ can't load kexts. Need this for tuntaposx.
   UT_FLAGS+=" -K tun -K tap"
 fi
