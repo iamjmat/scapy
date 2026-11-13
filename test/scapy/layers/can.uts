@@ -41,13 +41,15 @@ pkt.flags == 0x4
 = Read PCAP file
 * From https://wiki.wireshark.org/SampleCaptures?action=AttachFile&do=get&target=CANopen.pca
 
+conf.contribs['CAN']['swap-bytes'] = False
+
 from io import BytesIO
 pcap_fd = BytesIO(b'\xd4\xc3\xb2\xa1\x02\x00\x04\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x04\x00\xe3\x00\x00\x00\xe2\xf3mT\x93\x8c\x03\x00\t\x00\x00\x00\t\x00\x00\x00\x00\x00\x073\x01\x00\x00\x00\x00\xe2\xf3mT\xae\x8c\x03\x00\n\x00\x00\x00\n\x00\x00\x00\x00\x00\x00\x00\x02\x7f\x00\x00\x81\x00\xe2\xf3mTI\x8f\x03\x00\t\x00\x00\x00\t\x00\x00\x00\x00\x00\x07B\x01\x00\x00\x00\x00\xe2\xf3mTM\x8f\x03\x00\t\x00\x00\x00\t\x00\x00\x00\x00\x00\x07c\x01\x00\x00\x00\x00\xe2\xf3mTN\x8f\x03\x00\t\x00\x00\x00\t\x00\x00\x00\x00\x00\x07!\x01\x00\x00\x00\x00\xf8\xf3mTv\x98\x04\x00\x10\x00\x00\x00\x10\x00\x00\x00\x00\x00\x06B\x08\x7f\x00\x00@\x08\x10\x00\x00\x00\x00\x00\xf8\xf3mT\x96\x98\x04\x00\x10\x00\x00\x00\x10\x00\x00\x00\x00\x00\x05\xc2\x08\x7f\x00\x00A\x08\x10\x00\x15\x00\x00\x00\xf8\xf3mT\xd4\x98\x04\x00\x10\x00\x00\x00\x10\x00\x00\x00\x00\x00\x06B\x08\x00\x00\x00`\x00\x00\x00\x00\x00\x00\x00\xf8\xf3mT\x12\x99\x04\x00\x10\x00\x00\x00\x10\x00\x00\x00\x00\x00\x06B\x08\x00\x00\x00\x80\x00\x00\x00!\x00\x00\x08\xf8\xf3mTC\x99\x04\x00\x10\x00\x00\x00\x10\x00\x00\x00\x00\x00\x05\xc2\x08\x7f\x00\x00\x00UltraHi\xf8\xf3mTx\x99\x04\x00\x10\x00\x00\x00\x10\x00\x00\x00\x00\x00\x06B\x08\x00\x00\x00\x80\x00\x00\x00!\x00\x00\x08\xf8\xf3mT\xce\x99\x04\x00\x10\x00\x00\x00\x10\x00\x00\x00\x00\x00\x06B\x08\x00\x00\x00p\x00\x00\x00\x00\x00\x00\x00\xf8\xf3mT\xe0\x99\x04\x00\x10\x00\x00\x00\x10\x00\x00\x00\x00\x00\x06B\x08\x00\x00\x00\x80\x00\x00\x00!\x00\x00\x08\xf8\xf3mT \x9a\x04\x00\x10\x00\x00\x00\x10\x00\x00\x00\x00\x00\x06B\x08\x00\x00\x00\x80\x00\x00\x00!\x00\x00\x08\xf8\xf3mTo\x9a\x04\x00\x10\x00\x00\x00\x10\x00\x00\x00\x00\x00\x05\xc2\x08\x00\x00\x00\x80\x00\x00\x00!\x00\x00\x083\xf4mTw\xbe\t\x00\x10\x00\x00\x00\x10\x00\x00\x00\x00\x00\x06B\x08\x7f\x00\x00@\x08\x10*\x00\x00\x00\x003\xf4mT4\xc0\t\x00\x10\x00\x00\x00\x10\x00\x00\x00\x00\x00\x05\xc2\x08\x00\x00\x00\x80\x08\x10*\x11\x00\t\x06i\xf4mT\xb0\x88\x0c\x00\x10\x00\x00\x00\x10\x00\x00\x00\x00\x00\x07\xe5\x08\x7f\x00\x00L\x00\x00\x00\x00\x00\x00\x00i\xf4mT+\x89\x0c\x00\x10\x00\x00\x00\x10\x00\x00\x00\x00\x00\x07\xe4\x08\x7f\x00\x00P\x00\x00\x00\x00\x00\x00\x00i\xf4mT-\x89\x0c\x00\x10\x00\x00\x00\x10\x00\x00\x00\x00\x00\x07\xe4\x08\x7f\x00\x00P\x00\x00\x00\x00\x00\x00\x00i\xf4mTS\x89\x0c\x00\x10\x00\x00\x00\x10\x00\x00\x00\x00\x00\x07\xe4\x08\x7f\x00\x00P\x00\x00\x00\x00\x00\x00\x00i\xf4mT\x99\x89\x0c\x00\x10\x00\x00\x00\x10\x00\x00\x00\x00\x00\x07\xe4\x08\x00\x00\x00P\x00\x00\x00\x00\x00\x00\x00\x8e\xf4mT\x86\xc4\x04\x00\n\x00\x00\x00\n\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x01B\x92\xf4mT\xae\xf0\x07\x00\n\x00\x00\x00\n\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x01\x00\xba\xf4mT%\xaa\x0b\x00\n\x00\x00\x00\n\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x02c\xe8\xf4mT\xbc\x0f\x06\x00\x10\x00\x00\x00\x10\x00\x00\x00\x00\x00\x06B\x08\x7f\x00\x00#\x00b\x01asdf\xe8\xf4mT\x07\x10\x06\x00\x10\x00\x00\x00\x10\x00\x00\x00\x00\x00\x05\xc2\x08\x00\x00\x00\x80\x00b\x01\x00\x00\x02\x06\x0f\xf5mT\x1c\x81\x00\x00\x10\x00\x00\x00\x10\x00\x00\x00\x00\x00\x06B\x08\x7f\x00\x00@\x00b\x01\x00\x00\x00\x00\x0f\xf5mT\xfe\x81\x00\x00\x10\x00\x00\x00\x10\x00\x00\x00\x00\x00\x05\xc2\x08\x00\x00\x00\x80\x00b\x01\x00\x00\x02\x068\xf5mT\x19\xc3\x00\x00\x10\x00\x00\x00\x10\x00\x00\x00\x00\x00\x06B\x08\x7f\x00\x00\xa0\x08\x10\x00\x10\x00\x00\x008\xf5mTg\xc3\x00\x00\x10\x00\x00\x00\x10\x00\x00\x00\x00\x00\x05\xc2\x08\x7f\x00\x00\xc2\x08\x10\x00\x15\x00\x00\x008\xf5mT\xd8\xc3\x00\x00\x10\x00\x00\x00\x10\x00\x00\x00\x00\x00\x06B\x08\x00\x00\x00\x80\x00\x00\x00!\x00\x00\x088\xf5mT\x17\xc4\x00\x00\x10\x00\x00\x00\x10\x00\x00\x00\x00\x00\x06B\x08\x7f\x00\x00\xa3\x00\x00\x00\x00\x00\x00\x008\xf5mT\xca\xc4\x00\x00\x10\x00\x00\x00\x10\x00\x00\x00\x00\x00\x05\xc2\x08\x00\x00\x00\x80\x00\x00\x00!\x00\x00\x08')
 packets = rdpcap(pcap_fd)
 
 = Check if parsing worked: each packet has a CAN layer
 
-all(CAN in pkt for pkt in packets)
+assert all(CAN in pkt for pkt in packets)
 
 = Check if parsing worked: no packet has a Raw or Padding layer
 
@@ -55,25 +57,39 @@ not any(Raw in pkt or Padding in pkt for pkt in packets)
 
 = Identifiers
 
-set(pkt.identifier for pkt in packets) == {0, 1474, 1602, 1825, 1843, 1858, 1891, 2020, 2021}
+assert set(pkt.identifier for pkt in packets) == {0, 1474, 1602, 1825, 1843, 1858, 1891, 2020, 2021}
 
 = Flags
 
-set(pkt.flags for pkt in packets) == {0}
+assert set(pkt.flags for pkt in packets) == {0}
 
 = Data length
 
 set(pkt.length for pkt in packets) == {1, 2, 8}
 
+= read PCAP of a CookedLinux/SocketCAN capture with CANFD frames
+
+conf.contribs['CAN']['swap-bytes'] = True
+
+packets = rdpcap(scapy_path("/test/pcaps/canfd.pcap.gz"))
+
+= Check if parsing worked: each packet has a CANFD layer
+
+assert all(CANFD in pkt[1] for pkt in packets)
+
+assert all(pkt.identifier == 0x123 for pkt in packets)
+assert len(packets) == 4
+
 
 ############
 ############
 
-+ swap-bytes functionality (for PF_CAN socket interactions)
++ swap-bytes and remove-padding functionality (for PF_CAN socket interactions)
 
 = read PCAP of a CookedLinux/SocketCAN capture (CAN standard and extended)
 
 conf.contribs['CAN']['swap-bytes'] = True
+conf.contribs['CAN']['remove-padding'] = False
 pcap_fd_can_a = BytesIO(b'\xd4\xc3\xb2\xa1\x02\x00\x04\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x04\x00q\x00\x00\x00\x15f`Zv\xde\n\x00 \x00\x00\x00 \x00\x00\x00\x00\x01\x01\x18\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x0c\xdf\x07\x00\x00\x03\x00\x00\x00\x02\x01\r\x00\x00\x00\x00\x00')
 packets_can_a = rdpcap(pcap_fd_can_a)
 pcap_fd_can_b = BytesIO(b'\xd4\xc3\xb2\xa1\x02\x00\x04\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x04\x00q\x00\x00\x00\xf4i`Z\xf3\x99\x07\x00 \x00\x00\x00 \x00\x00\x00\x00\x01\x01\x18\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x0c\xf13\xdb\x98\x03\x00\x00\x00\x02\x01\r\x00\x00\x00\x00\x00')
@@ -116,9 +132,13 @@ p_too_much_data = CAN(flags='error', length=1, identifier=1234, data=b'\x01\x02'
 p = CAN(bytes(p_too_much_data))
 p.haslayer('Padding') and p['Padding'].load == b'\x02'
 
++ rdcandump
 
 = Check rdcandump default
 * default reading
+
+conf.contribs['CAN']['remove-padding'] = True
+
 pcap_fd = BytesIO(b'''(1539191392.761779) vcan0 123#11223344
                     (1539191470.820239) vcan0 123#11223344
                     (1539191471.503168) vcan0 123#11223344
@@ -127,9 +147,11 @@ pcap_fd = BytesIO(b'''(1539191392.761779) vcan0 123#11223344
                     (1539191494.084177) vcan0 1F334455#1122334455667788
                     (1539191494.724228) vcan0 1F334455#1122334455667788
                     (1539191495.148182) vcan0 1F334455#1122334455667788
-                    (1539191495.563320) vcan0 1F334455#1122334455667788''')
+                    (1539191495.563320) vcan0 1F334455#1122334455667788
+                    (1539191470.820239) vcan0 123##1112233445566778899aabbccddeeff
+                    (1539191495.563320) vcan0 1F334455##1112233445566778899aabbccddeeff''')
 packets = rdcandump(pcap_fd)
-assert len(packets) == 9
+assert len(packets) == 11
 assert packets[0].identifier == 0x123
 assert packets[8].identifier == 0x1F334455
 assert packets[8].flags == 0b100
@@ -137,6 +159,10 @@ assert packets[0].length == 4
 assert packets[8].length == 8
 assert packets[0].data == b'\x11\x22\x33\x44'
 assert packets[8].data == b'\x11\x22\x33\x44\x55\x66\x77\x88'
+assert packets[9].identifier == 0x123
+assert packets[10].identifier == 0x1F334455
+assert packets[9].data == b'\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff'
+assert packets[10].data == b'\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff'
 
 = Check rdcandump_iterable default
 * default reading
@@ -148,9 +174,11 @@ pcap_fd = BytesIO(b'''(1539191392.761779) vcan0 123#11223344
                     (1539191494.084177) vcan0 1F334455#1122334455667788
                     (1539191494.724228) vcan0 1F334455#1122334455667788
                     (1539191495.148182) vcan0 1F334455#1122334455667788
-                    (1539191495.563320) vcan0 1F334455#1122334455667788''')
+                    (1539191495.563320) vcan0 1F334455#1122334455667788
+                    (1539191470.820239) vcan0 123##1112233445566778899aabbccddeeff
+                    (1539191495.563320) vcan0 1F334455##1112233445566778899aabbccddeeff''')
 packets = [x for x in CandumpReader(pcap_fd)]
-assert len(packets) == 9
+assert len(packets) == 11
 assert packets[0].identifier == 0x123
 assert packets[8].identifier == 0x1F334455
 assert packets[8].flags == 0b100
@@ -158,6 +186,10 @@ assert packets[0].length == 4
 assert packets[8].length == 8
 assert packets[0].data == b'\x11\x22\x33\x44'
 assert packets[8].data == b'\x11\x22\x33\x44\x55\x66\x77\x88'
+assert packets[9].identifier == 0x123
+assert packets[10].identifier == 0x1F334455
+assert packets[9].data == b'\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff'
+assert packets[10].data == b'\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff'
 
 = Check rdcandump filter
 * interface filter 1
@@ -242,20 +274,27 @@ pcap_fd = BytesIO(b'''  vcan0  1F334455   [8]  11 22 33 44 55 66 77 88
   vcan0       1F3   [8]  11 22 33 44 55 66 77 88
   vcan0  1F334455   [8]  11 22 33 44 55 66 77 88
   vcan0  1F334455   [4]  11 22 33 44
-  vcan0       1F3   [4]  11 22 33 44''')
+  vcan0       1F3   [4]  11 22 33 44
+  vcan0  1F334455  [09]  11 22 33 44 55 66 77 88 99
+  vcan0       1F3  [09]  11 22 33 44 55 66 77 88 99
+  ''')
 packets = rdcandump(pcap_fd)
-assert len(packets) == 8
+assert len(packets) == 10
 packets[-1].show()
-assert packets[-1].identifier == 0x1F3
+assert packets[-3].identifier == 0x1F3
 assert packets[1].identifier == 0x1F3
 assert packets[0].identifier == 0x1F334455
 assert packets[0].flags == 0b100
-assert packets[-1].length == 4
+assert packets[-3].length == 4
 assert packets[0].length == 8
 assert packets[1].length == 8
-assert packets[-1].data == b'\x11\x22\x33\x44'
+assert packets[-1].length == 9
+assert packets[8].length == 9
+assert packets[-3].data == b'\x11\x22\x33\x44'
 assert packets[0].data == b'\x11\x22\x33\x44\x55\x66\x77\x88'
 assert packets[1].data == b'\x11\x22\x33\x44\x55\x66\x77\x88'
+assert packets[8].data == b'\x11\x22\x33\x44\x55\x66\x77\x88\x99'
+assert packets[-1].data == b'\x11\x22\x33\x44\x55\x66\x77\x88\x99'
 
 = interface not log file format filtered 1
 pcap_fd = BytesIO(b'''  vcan0  1F334455   [8]  11 22 33 44 55 66 77 88
@@ -266,19 +305,24 @@ pcap_fd = BytesIO(b'''  vcan0  1F334455   [8]  11 22 33 44 55 66 77 88
   vcan1  1F334455   [8]  11 22 33 44 55 66 77 88
   vcan1  1F334455   [4]  11 22 33 44
   vcan0       1F3   [4]  11 22 33 44
+  vcan0  1F334455  [09]  11 22 33 44 55 66 77 88 99
+  vcan1       1F3  [09]  11 22 33 44 55 66 77 88 99
 ''')
 packets = rdcandump(pcap_fd, interface="vcan0")
-assert len(packets) == 4
-assert packets[-1].identifier == 0x1F3
+assert len(packets) == 5
+assert packets[-2].identifier == 0x1F3
 assert packets[2].identifier == 0x1F3
 assert packets[0].identifier == 0x1F334455
+assert packets[-1].identifier == 0x1F334455
 assert packets[0].flags == 0b100
-assert packets[-1].length == 4
+assert packets[-2].length == 4
 assert packets[0].length == 8
 assert packets[2].length == 8
-assert packets[-1].data == b'\x11\x22\x33\x44'
+assert packets[-1].length == 9
+assert packets[-2].data == b'\x11\x22\x33\x44'
 assert packets[0].data == b'\x11\x22\x33\x44\x55\x66\x77\x88'
 assert packets[2].data == b'\x11\x22\x33\x44\x55\x66\x77\x88'
+assert packets[-1].data == b'\x11\x22\x33\x44\x55\x66\x77\x88\x99'
 
 
 = interface not log file format filtered 2
@@ -378,9 +422,10 @@ pcap_fd = BytesIO(b'''(1539191392.761779) vcan0 123#11223344
                     (1539191494.084177) vcan0 00000055#1122334455667788
                     (1539191494.724228) vcan0 00000055#1122334455667788
                     (1539191495.148182) vcan0 00000055#1122334455667788
-                    (1539191495.563320) vcan0 00000055#1122334455667788''')
+                    (1539191495.563320) vcan0 00000055#1122334455667788
+                    (1539191494.724228) vcan0 00000055##1112233445566778899''')
 packets = rdcandump(pcap_fd)
-assert len(packets) == 9
+assert len(packets) == 10
 assert packets[0].identifier == 0x123
 assert packets[8].identifier == 0x55
 assert packets[8].flags == 0b100
@@ -388,6 +433,10 @@ assert packets[0].length == 4
 assert packets[8].length == 8
 assert packets[0].data == b'\x11\x22\x33\x44'
 assert packets[8].data == b'\x11\x22\x33\x44\x55\x66\x77\x88'
+assert packets[8].identifier == 0x55
+assert packets[8].flags == 0b100
+assert packets[9].length == 9
+assert packets[9].data == b'\x11\x22\x33\x44\x55\x66\x77\x88\x99'
 
 
 = interface not log file format
@@ -1435,3 +1484,446 @@ nan = [x for x in li if math.isnan(x)]
 
 assert len(nan) >= 0
 assert abs(len(gz) - len(lz)) < (testlen // 10)
+
++ SECOC CANFD
+
+= Load SecOC_CANFD
+
+load_contrib("automotive.autosar.secoc_canfd", globals_dict=globals())
+
+
+= Test SecOC_CANFD build
+
+#SecOC_CANFD.register_secoc_protected_pdu(0x123)
+
+pkt = SecOC_CANFD(identifier=0x123, pdu_payload=bytes.fromhex("1122334455667788AABBCCDDEEFF0011"))
+pkt.show2()
+canfd = CANFD(bytes(pkt))
+canfd.show2()
+pkt = SecOC_CANFD(bytes(pkt))
+
+assert pkt.identifier == canfd.identifier
+assert pkt.data == canfd.data
+assert pkt.length == canfd.length
+
+SecOC_CANFD.register_secoc_protected_pdu(0x123)
+
+pkt = CANFD(identifier=0x123, data=bytes.fromhex("1122334455667788AABBCCDDEEFF001122334455"))
+canfd = CANFD(bytes(pkt))
+canfd.show2()
+pkt = SecOC_CANFD(bytes(pkt))
+pkt.show2()
+
+assert pkt.identifier == canfd.identifier
+assert bytes(pkt.pdu_payload) == bytes(canfd.data)[:-4]
+assert pkt.length == canfd.length
+assert pkt.tfv == 0x22
+assert pkt.tmac == b"\x33\x44\x55"
+
+pkt.secoc_authenticate()
+
+assert pkt.tfv == 0
+assert pkt.tmac != b"\x33\x44\x55"
+
+if conf.crypto_valid:
+    from cryptography.hazmat.primitives import cmac
+    from cryptography.hazmat.primitives.ciphers import algorithms
+    c = cmac.CMAC(algorithms.AES128(b"\x00" * 16))
+    c.update(bytes.fromhex("1122334455667788AABBCCDDEEFF0011") + bytes.fromhex("00000000"))
+    mac = c.finalize()
+    assert pkt.tmac == mac[:3]
+
++ Candump remote request
+
+= Parse remote request with declared length
+
+remote = CandumpReader(BytesIO(b"(1.000000) vcan0 123#R8\n")).read_packet()
+assert "remote_transmission_request" in remote.flags
+assert remote.length == 8
+assert remote.data == b""
+
+############
+############
+
++ CAN XL basic operations
+
+= CAN XL constants
+
+from scapy.layers.can import (
+    CAN, CANFD, CANXL,
+    CANXL_FDF, CANXL_HDR_SIZE, CANXL_IDE, CANXL_MAX_DLEN,
+    CANXL_MIN_DLEN, CANXL_MTU, CANXL_RRS, CANXL_SEC, CANXL_XLF,
+)
+
+assert CANXL_HDR_SIZE == 12
+assert CANXL_MTU == 2060
+assert CANXL_XLF == 0x80
+assert CANXL_FDF == 0x40
+assert CANXL_IDE == 0x20
+assert CANXL_SEC == 0x01
+assert CANXL_RRS == 0x02
+assert CANXL_MIN_DLEN == 1
+assert CANXL_MAX_DLEN == 2048
+
+= CAN XL default field values
+
+pkt = CANXL()
+assert pkt.priority == 0
+assert pkt.vcid == 0
+assert pkt.reserved1 == 0
+assert pkt.reserved2 == 0
+assert pkt.sdt == 0
+assert pkt.af == 0
+assert int(pkt.flags) == 0xC0   # XLF+FDF set by default (ISO 11898-1)
+assert pkt.flags.xlf == 1
+assert pkt.flags.fdf == 1
+assert pkt.flags.ide == 0
+assert pkt.length is None   # computed from the payload in post_build
+
+= CAN XL build with default ISO flags (XLF+FDF, IDE=0)
+
+pkt = CANXL() / b'\xde'
+wire = raw(pkt)
+assert wire[4] & CANXL_XLF        # XLF must be set
+assert wire[4] & CANXL_FDF        # FDF must be set
+assert not (wire[4] & CANXL_IDE)  # IDE must be clear
+
+= CAN XL TV1: minimal frame wire format
+# priority=0x042, flags=0xC0 (XLF+FDF), sdt=0x00, af=0, payload=b'\xde'
+# Expected wire bytes (BE for Priority/VCID, LE for len/af):
+#   prio BE : 00 00 00 42
+#   flags   : c0
+#   sdt     : 00
+#   len  LE : 01 00
+#   af   LE : 00 00 00 00
+#   data    : de
+
+pkt = CANXL(priority=0x042) / b'\xde'
+wire = raw(pkt)
+assert wire == bytes.fromhex('00000042' 'c0' '00' '0100' '00000000' 'de'), wire.hex()
+
+= CAN XL TV2: all fields set
+
+pkt = CANXL(priority=0x123, vcid=0x45, sdt=0x07, af=0x12345678) / \
+    b'\xde\xad\xbe\xef'
+wire = raw(pkt)
+assert wire == bytes.fromhex('00450123' 'c0' '07' '0400' '78563412' 'deadbeef'), wire.hex()
+
+= CAN XL TV3: SEC flag set
+
+pkt = CANXL(priority=0x000, flags=0xC1, sdt=0x00, af=0) / b'\x11\x22'
+wire = raw(pkt)
+assert wire == bytes.fromhex('00000000' 'c1' '00' '0200' '00000000' '1122'), wire.hex()
+
+= CAN XL TV4: RRS flag and max identifier + vcid
+
+pkt = CANXL(priority=0x7ff, vcid=0xff, flags=0xC2, sdt=0xff,
+            af=0xffffffff) / b'\xff'
+wire = raw(pkt)
+# prio = (0xff << 16) | 0x7ff -> 0x00ff07ff -> BE: 00 ff 07 ff
+assert wire == bytes.fromhex('00ff07ff' 'c2' 'ff' '0100' 'ffffffff' 'ff'), wire.hex()
+
+= CAN XL TV5: 2048-byte payload (max)
+
+payload = bytes(range(256)) * 8
+pkt = CANXL(priority=0x001) / payload
+wire = raw(pkt)
+assert len(wire) == CANXL_HDR_SIZE + 2048
+# len field LE at bytes 6-7 = 0x0800  (len=2048)
+assert wire[6:8] == b'\x00\x08', wire[6:8].hex()
+
+= CAN XL explicit flags are sent unchanged
+
+# The default follows ISO 11898-1: XLF=1, FDF=1, IDE=0
+wire = raw(CANXL() / b'\xaa')
+assert wire[4] == CANXL_XLF | CANXL_FDF
+
+# A value given by the user reaches the wire, it is not corrected
+wire = raw(CANXL(flags=0x00) / b'\xaa')
+assert wire[4] == 0x00
+
+wire = raw(CANXL(flags=0xE0) / b'\xaa')
+assert wire[4] == 0xE0
+
+= CAN XL explicit length is sent unchanged
+
+# Left at None the length is computed from the payload
+assert CANXL(raw(CANXL() / b'\x01\x02')).length == 2
+
+# A length given by the user reaches the wire even if it does not match
+wire = raw(CANXL(length=0x40) / b'\x01\x02')
+assert wire[6:8] == b'\x40\x00'
+assert CANXL(wire).length == 0x40
+
+= CAN XL respects the remove-padding configuration
+
+trailing = raw(CANXL() / b'\x01\x02') + b'\x00' * 6
+
+conf.contribs['CAN']['remove-padding'] = True
+assert bytes(CANXL(trailing).payload) == b'\x01\x02'
+
+conf.contribs['CAN']['remove-padding'] = False
+assert bytes(CANXL(trailing).payload) == b'\x01\x02' + b'\x00' * 6
+
+conf.contribs['CAN']['remove-padding'] = True
+
+############
+############
+
++ CAN XL dispatch_hook
+
+= dispatch_hook returns CANXL for XL frame bytes
+
+# Byte 4 has bit 7 set (flags=0xC0) -> CANXL
+xl_bytes = bytes.fromhex('00000042' 'c0' '00' '0100' '00000000' 'de')
+assert CAN.dispatch_hook(_pkt=xl_bytes) == CANXL
+
+= dispatch_hook still returns CAN for classic CAN
+
+can_bytes = bytes(16)  # All zeros, length byte (byte 4) = 0
+assert CAN.dispatch_hook(_pkt=can_bytes) == CAN
+
+= dispatch_hook still returns CANFD for FD frames
+
+# CANFD: byte 4 = 12 (length > 8), byte 5 = 0x04 (fd_frame flag)
+canfd_bytes = b'\x00\x00\x00\x00\x0c\x04\x00\x00' + b'\x00' * 12
+assert CAN.dispatch_hook(_pkt=canfd_bytes) == CANFD
+
+############
+############
+
++ CAN XL dissection
+
+= CAN XL TV1 dissect
+
+wire = bytes.fromhex('00000042' 'c0' '00' '0100' '00000000' 'de')
+pkt = CANXL(wire)
+assert pkt.priority == 0x042
+assert pkt.vcid == 0x00
+assert pkt.sdt == 0x00
+assert pkt.af == 0x00000000
+assert pkt.length == 1
+assert bytes(pkt.payload) == b'\xde'
+assert pkt.flags.xlf == 1
+assert pkt.flags.fdf == 1
+assert pkt.flags.ide == 0
+
+= CAN XL TV2 dissect
+
+wire = bytes.fromhex('00450123' 'c0' '07' '0400' '78563412' 'deadbeef')
+pkt = CANXL(wire)
+assert pkt.priority == 0x123
+assert pkt.vcid == 0x45
+assert pkt.sdt == 0x07
+assert pkt.af == 0x12345678
+assert pkt.length == 4
+assert bytes(pkt.payload) == b'\xde\xad\xbe\xef'
+
+= CAN XL TV3 dissect (SEC flag)
+
+wire = bytes.fromhex('00000000' 'c1' '00' '0200' '00000000' '1122')
+pkt = CANXL(wire)
+assert pkt.flags.sec == 1
+assert pkt.flags.xlf == 1
+assert pkt.flags.fdf == 1
+assert pkt.flags.rrs == 0
+
+= CAN XL TV4 dissect (RRS + max fields)
+
+wire = bytes.fromhex('00ff07ff' 'c2' 'ff' '0100' 'ffffffff' 'ff')
+pkt = CANXL(wire)
+assert pkt.priority == 0x7ff
+assert pkt.vcid == 0xff
+assert pkt.sdt == 0xff
+assert pkt.af == 0xffffffff
+assert pkt.flags.rrs == 1
+assert pkt.flags.fdf == 1
+assert pkt.flags.sec == 0
+
+############
+############
+
++ CAN XL round-trip tests
+
+= CAN XL round-trip: simple frame
+
+orig = CANXL(priority=0x1ab, vcid=0xcc, sdt=0x05, af=0xdeadbeef) / \
+    b'round-trip'
+rx = CANXL(raw(orig))
+assert rx.priority == orig.priority
+assert rx.vcid == orig.vcid
+assert rx.sdt == orig.sdt
+assert rx.af == orig.af
+assert bytes(rx.payload) == b'round-trip'
+
+= CAN XL round-trip: auto-computed length from payload
+
+pkt = CANXL(priority=0x042) / b'\x01\x02\x03'
+rx = CANXL(raw(pkt))
+assert rx.length == 3
+assert bytes(rx.payload) == b'\x01\x02\x03'
+
+= CAN XL round-trip: 1-byte payload (minimum)
+
+pkt = CANXL() / b'\xaa'
+rx = CANXL(raw(pkt))
+assert rx.length == 1
+assert bytes(rx.payload) == b'\xaa'
+
+= CAN XL round-trip: 2048-byte payload (maximum)
+
+payload = bytes(range(256)) * 8
+pkt = CANXL() / payload
+rx = CANXL(raw(pkt))
+assert rx.length == 2048
+assert bytes(rx.payload) == payload
+
+############
+############
+
++ CAN XL ISO 11898-1 property accessors
+
+= CAN XL dlc property
+
+pkt = CANXL() / b'\x01\x02\x03'
+rx = CANXL(raw(pkt))
+assert rx.dlc == 2  # length=3 -> dlc=2
+
+pkt = CANXL() / b'\xaa'
+rx = CANXL(raw(pkt))
+assert rx.dlc == 0  # length=1 -> dlc=0
+
+payload = bytes(range(256)) * 8
+pkt = CANXL() / payload
+rx = CANXL(raw(pkt))
+assert rx.dlc == 2047  # length=2048 -> dlc=2047
+
+= CAN XL xlf property
+
+pkt = CANXL() / b'\x01'
+assert pkt.xlf == True
+
+= CAN XL fdf property
+
+pkt = CANXL() / b'\x01'
+assert pkt.fdf == True
+
+= CAN XL ide property
+
+pkt = CANXL() / b'\x01'
+assert pkt.ide == False
+
+# Even when explicitly set at field level, ide reads from flags
+pkt = CANXL(flags=0xE0) / b'\x01'
+assert pkt.ide == True
+
+= CAN XL sec property
+
+pkt = CANXL(flags=0xC1) / b'\x01'
+assert pkt.sec == True
+pkt = CANXL(flags=0xC0) / b'\x01'
+assert pkt.sec == False
+
+= CAN XL ftype property
+
+pkt = CANXL(flags=0xC2) / b'\x01'
+assert pkt.ftype == True
+pkt = CANXL(flags=0xC0) / b'\x01'
+assert pkt.ftype == False
+
+= CAN XL frame_format property
+
+# Default CAN XL: XLF+FDF = 0b110 = 6
+pkt = CANXL() / b'\x01'
+assert pkt.frame_format == 6  # XLF+FDF: 0b110
+
+# Explicit flags (pre-enforcement, at field level)
+pkt = CANXL(flags=0xC0) / b'\x01'
+assert pkt.frame_format == 6  # XLF+FDF: 0b110
+
+pkt = CANXL(flags=0xE0) / b'\x01'
+assert pkt.frame_format == 7  # XLF+FDF+IDE: 0b111
+
+############
+############
+
++ CAN XL show_iso()
+
+= CAN XL show ISO style contains expected field names
+
+pkt = CANXL(priority=0x123, vcid=0x45, sdt=0x07,
+            af=0x12345678) / b'\xde\xad\xbe\xef'
+output = pkt.show_iso(dump=True)
+assert "Priority" in output
+assert "VCID" in output
+assert "Format" in output
+assert "SEC" in output
+assert "FTYPE" in output
+assert "SDT" in output
+assert "DLC" in output
+assert "AF" in output
+assert "Data" in output
+assert "ISO 11898-1" in output
+
+= CAN XL show default style works
+
+pkt = CANXL(priority=0x42) / b'\x01'
+output = pkt.show(dump=True)
+assert "CAN XL" in output
+assert "priority" in output
+assert "flags" in output
+
+############
+############
+
++ CAN XL swap-bytes and pcap interactions
+
+= CAN XL swap-bytes configuration
+
+conf.contribs['CAN']['swap-bytes'] = True
+pkt = CANXL(priority=0x123, vcid=0x45, sdt=0x07, af=0x12345678) / b'\xde\xad\xbe\xef'
+wire = raw(pkt)
+# When swap-bytes=True, priority word is swapped to SocketCAN LE format
+assert wire[:4] == bytes.fromhex('23014500')
+assert wire[4:] == bytes.fromhex('c007040078563412deadbeef')
+# Dissect back with swap-bytes=True
+rx = CANXL(wire)
+assert rx.priority == 0x123
+assert rx.vcid == 0x45
+assert rx.sdt == 0x07
+assert rx.af == 0x12345678
+assert bytes(rx.payload) == b'\xde\xad\xbe\xef'
+
+# Dispatch hook with swap-bytes=True
+rx_can = CAN(wire)
+assert isinstance(rx_can, CANXL)
+assert rx_can.priority == 0x123
+assert rx_can.vcid == 0x45
+
+conf.contribs['CAN']['swap-bytes'] = False
+
+= CAN XL pcap write and read
+
+from scapy.utils import get_temp_file
+tmp_pcap = get_temp_file(autoext=".pcap")
+orig = CANXL(priority=0x123, vcid=0x45, sdt=0x07, af=0x12345678) / b'\xde\xad\xbe\xef'
+wrpcap(tmp_pcap, [orig])
+pkts = rdpcap(tmp_pcap)
+assert len(pkts) == 1
+assert isinstance(pkts[0], CANXL)
+assert pkts[0].priority == 0x123
+assert pkts[0].vcid == 0x45
+assert pkts[0].sdt == 0x07
+assert pkts[0].af == 0x12345678
+assert bytes(pkts[0].payload) == b'\xde\xad\xbe\xef'
+
+= CAN XL CookedLinux binding
+
+orig = CookedLinux(proto=14) / CANXL(priority=0x123, vcid=0x45) / b'\x01\x02'
+wire = raw(orig)
+rx = CookedLinux(wire)
+assert CANXL in rx
+assert rx[CANXL].priority == 0x123
+assert rx[CANXL].vcid == 0x45
+assert bytes(rx[CANXL].payload) == b'\x01\x02'
+

@@ -1,7 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # This file is part of Scapy
+# See https://scapy.net/ for more information
 # Copyright (C) 2007, 2008, 2009 Arnaud Ebalard
 #               2015, 2016, 2017 Maxence Tury
-# This program is published under a GPLv2 license
 
 """
 TLS cipher suites.
@@ -10,12 +11,10 @@ A comprehensive list of specified cipher suites can be consulted at:
 https://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml
 """
 
-from __future__ import absolute_import
 from scapy.layers.tls.crypto.kx_algs import _tls_kx_algs
 from scapy.layers.tls.crypto.hash import _tls_hash_algs
 from scapy.layers.tls.crypto.h_mac import _tls_hmac_algs
 from scapy.layers.tls.crypto.ciphers import _tls_cipher_algs
-import scapy.modules.six as six
 
 
 def get_algs_from_ciphersuite_name(ciphersuite_name):
@@ -30,7 +29,7 @@ def get_algs_from_ciphersuite_name(ciphersuite_name):
         if s.endswith("CCM") or s.endswith("CCM_8"):
             kx_name, s = s.split("_WITH_")
             kx_alg = _tls_kx_algs.get(kx_name)
-            hash_alg = _tls_hash_algs.get("SHA256")
+            hash_alg = _tls_hash_algs.get("sha256")
             cipher_alg = _tls_cipher_algs.get(s)
             hmac_alg = None
 
@@ -43,7 +42,7 @@ def get_algs_from_ciphersuite_name(ciphersuite_name):
                 kx_alg = _tls_kx_algs.get("TLS13")
 
             hash_name = s.split('_')[-1]
-            hash_alg = _tls_hash_algs.get(hash_name)
+            hash_alg = _tls_hash_algs.get(hash_name.lower())
 
             cipher_name = s[:-(len(hash_name) + 1)]
             if tls1_3:
@@ -62,7 +61,7 @@ def get_algs_from_ciphersuite_name(ciphersuite_name):
         cipher_alg = _tls_cipher_algs.get(cipher_name.rstrip("_EXPORT40"))
         kx_alg.export = cipher_name.endswith("_EXPORT40")
         hmac_alg = _tls_hmac_algs.get("HMAC-NULL")
-        hash_alg = _tls_hash_algs.get(hash_name)
+        hash_alg = _tls_hash_algs.get(hash_name.lower())
 
     return kx_alg, cipher_alg, hmac_alg, hash_alg, tls1_3
 
@@ -126,7 +125,7 @@ class _GenericCipherSuiteMetaclass(type):
         return the_class
 
 
-class _GenericCipherSuite(six.with_metaclass(_GenericCipherSuiteMetaclass, object)):  # noqa: E501
+class _GenericCipherSuite(metaclass=_GenericCipherSuiteMetaclass):
     def __init__(self, tls_version=0x0303):
         """
         Most of the attributes are fixed and have already been set by the
@@ -1308,12 +1307,12 @@ def get_usable_ciphersuites(li, kx):
     res = []
     for c in li:
         if c in _tls_cipher_suites_cls:
-            ciph = _tls_cipher_suites_cls[c]
-            if ciph.usable:
+            cipher = _tls_cipher_suites_cls[c]
+            if cipher.usable:
                 # XXX select among RSA and ECDSA cipher suites
                 # according to the key(s) the server was given
-                if (ciph.kx_alg.anonymous or
-                   kx in ciph.kx_alg.name or
-                   ciph.kx_alg.name == "TLS13"):
+                if (cipher.kx_alg.anonymous or
+                   kx in cipher.kx_alg.name or
+                   cipher.kx_alg.name == "TLS13"):
                     res.append(c)
     return res

@@ -1,7 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # This file is part of Scapy
+# See https://scapy.net/ for more information
 # Copyright (C) 2007, 2008, 2009 Arnaud Ebalard
 #               2015, 2016, 2017 Maxence Tury
-# This program is published under a GPLv2 license
 
 """
 This is a register for DH groups from RFC 3526 and RFC 4306.
@@ -12,48 +13,31 @@ We also provide TLS identifiers for these DH groups and also the ECDH groups.
 (Note that the equivalent of _ffdh_groups for ECDH is ec._CURVE_TYPES.)
 """
 
-from __future__ import absolute_import
+import warnings
 
 from scapy.config import conf
+from scapy.compat import bytes_int, int_bytes
 from scapy.error import warning
 from scapy.utils import long_converter
-import scapy.modules.six as six
+
 if conf.crypto_valid:
     from cryptography.hazmat.backends import default_backend
-    from cryptography.hazmat.primitives.asymmetric import dh, ec
+    from cryptography.hazmat.primitives.asymmetric import ec
     from cryptography.hazmat.primitives import serialization
+    # cryptography > 50 raises a DeprecationWarning
+    from cryptography.utils import CryptographyDeprecationWarning
+    with warnings.catch_warnings():
+        # Hide deprecation warnings
+        warnings.filterwarnings("ignore",
+                                category=CryptographyDeprecationWarning)
+        from cryptography.hazmat.primitives.asymmetric.dh import (
+            DHParameterNumbers,
+            DHPublicNumbers,
+            DHPrivateKey,
+        )
 if conf.crypto_valid_advanced:
     from cryptography.hazmat.primitives.asymmetric import x25519
     from cryptography.hazmat.primitives.asymmetric import x448
-
-# We have to start by a dirty hack in order to allow long generators,
-# which some versions of openssl love to use...
-
-if conf.crypto_valid:
-    from cryptography.hazmat.primitives.asymmetric.dh import DHParameterNumbers
-
-    try:
-        # We test with dummy values whether the size limitation has been removed.  # noqa: E501
-        pn_test = DHParameterNumbers(2, 7)
-    except ValueError:
-        # We get rid of the limitation through the cryptography v1.9 __init__.
-
-        def DHParameterNumbers__init__hack(self, p, g, q=None):
-            if (
-                not isinstance(p, six.integer_types) or
-                not isinstance(g, six.integer_types)
-            ):
-                raise TypeError("p and g must be integers")
-            if q is not None and not isinstance(q, six.integer_types):
-                raise TypeError("q must be integer or None")
-
-            self._p = p
-            self._g = g
-            self._q = q
-
-        DHParameterNumbers.__init__ = DHParameterNumbers__init__hack
-
-    # End of hack.
 
 
 _ffdh_groups = {}
@@ -70,7 +54,7 @@ class _FFDHParamsMetaclass(type):
         return the_class
 
 
-class _FFDHParams(six.with_metaclass(_FFDHParamsMetaclass)):
+class _FFDHParams(metaclass=_FFDHParamsMetaclass):
     pass
 
 
@@ -436,18 +420,33 @@ _tls_named_curves = {1: "sect163k1", 2: "sect163r1", 3: "sect163r2",
                      0xff01: "arbitrary_explicit_prime_curves",
                      0xff02: "arbitrary_explicit_char2_curves"}
 
+_tls_post_quantum_hybrid = {
+    # https://www.ietf.org/archive/id/draft-kwiatkowski-tls-ecdhe-mlkem-02.html#name-secp256r1mlkem768
+    0x11EB: "SecP256r1MLKEM768",
+    # https://www.ietf.org/archive/id/draft-kwiatkowski-tls-ecdhe-mlkem-02.html#name-x25519mlkem768
+    0x11EC: "X25519MLKEM768",
+    # https://www.ietf.org/archive/id/draft-tls-westerbaan-xyber768d00-03.html#name-iana-considerations
+    0x6399: "X25519Kyber768Draft00",
+}
+
 _tls_named_groups = {}
 _tls_named_groups.update(_tls_named_ffdh_groups)
 _tls_named_groups.update(_tls_named_curves)
+_tls_named_groups.update(_tls_post_quantum_hybrid)
 
 
 def _tls_named_groups_import(group, pubbytes):
     if group in _tls_named_ffdh_groups:
+        # https://datatracker.ietf.org/doc/html/rfc8446#section-4.2.8.1
         params = _ffdh_groups[_tls_named_ffdh_groups[group]][0]
         pn = params.parameter_numbers()
-        public_numbers = dh.DHPublicNumbers(pubbytes, pn)
+        y = bytes_int(pubbytes)
+        if not 1 < y < pn.p - 1:
+            return None
+        public_numbers = DHPublicNumbers(y, pn)
         return public_numbers.public_key(default_backend())
     elif group in _tls_named_curves:
+        # https://datatracker.ietf.org/doc/html/rfc8446#section-4.2.8.2
         if _tls_named_curves[group] in ["x25519", "x448"]:
             if conf.crypto_valid_advanced:
                 if _tls_named_curves[group] == "x25519":
@@ -456,7 +455,12 @@ def _tls_named_groups_import(group, pubbytes):
                     import_point = x448.X448PublicKey.from_public_bytes
                 return import_point(pubbytes)
         else:
-            curve = ec._CURVE_TYPES[_tls_named_curves[group]]()
+            curve = ec._CURVE_TYPES[_tls_named_curves[group]]
+            try:
+                # cryptography < 42
+                curve = curve()
+            except TypeError:
+                pass
             try:  # cryptography >= 2.5
                 return ec.EllipticCurvePublicKey.from_encoded_point(
                     curve,
@@ -471,11 +475,13 @@ def _tls_named_groups_import(group, pubbytes):
 
 
 def _tls_named_groups_pubbytes(privkey):
-    if isinstance(privkey, dh.DHPrivateKey):
+    if isinstance(privkey, DHPrivateKey):
+        # https://datatracker.ietf.org/doc/html/rfc8446#section-4.2.8.1
         pubkey = privkey.public_key()
-        return pubkey.public_numbers().y
+        return int_bytes(pubkey.public_numbers().y, privkey.key_size // 8)
     elif isinstance(privkey, (x25519.X25519PrivateKey,
                               x448.X448PrivateKey)):
+        # https://datatracker.ietf.org/doc/html/rfc8446#section-4.2.8.2
         pubkey = privkey.public_key()
         return pubkey.public_bytes(
             serialization.Encoding.Raw,
@@ -511,7 +517,12 @@ def _tls_named_groups_generate(group):
                     "Your cryptography version doesn't support " + group_name
                 )
         else:
-            curve = ec._CURVE_TYPES[_tls_named_curves[group]]()
+            curve = ec._CURVE_TYPES[_tls_named_curves[group]]
+            try:
+                # cryptography < 42
+                curve = curve()
+            except TypeError:
+                pass
             return ec.generate_private_key(curve, default_backend())
 
 # Below lies ghost code since the shift from 'ecdsa' to 'cryptography' lib.

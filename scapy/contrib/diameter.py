@@ -1,22 +1,23 @@
-##########################################################################
-#
-#       Diameter protocol implementation for Scapy
-#   Original Author: patrick battistello
-#
-#   This implements the base Diameter protocol RFC6733 and the additional standards:  # noqa: E501
-#     RFC7155, RFC4004, RFC4006, RFC4072, RFC4740, RFC5778, RFC5447, RFC6942, RFC5777  # noqa: E501
-#     ETS29229 V12.3.0 (2014-09), ETS29272 V13.1.0 (2015-03), ETS29329 V12.5.0 (2014-12),  # noqa: E501
-#     ETS29212 V13.1.0 (2015-03), ETS32299 V13.0.0 (2015-03), ETS29210 V6.7.0 (2006-12),  # noqa: E501
-#     ETS29214 V13.1.0 (2015-03), ETS29273 V12.7.0 (2015-03), ETS29173 V12.3.0 (2015-03),  # noqa: E501
-#     ETS29172 V12.5.0 (2015-03), ETS29215 V13.1.0 (2015-03), ETS29209 V6.8.0 (2011-09),  # noqa: E501
-#     ETS29061 V13.0.0 (2015-03), ETS29219 V13.0.0 (2014-12)
-#
-#       IMPORTANT note:
-#
-#           - Some Diameter fields (Unsigned64, Float32, ...) have not been tested yet due to lack  # noqa: E501
-#               of network captures containing AVPs of that types contributions are welcomed.  # noqa: E501
-#
-##########################################################################
+# SPDX-License-Identifier: GPL-2.0-only
+# This file is part of Scapy
+# See https://scapy.net/ for more information
+# Acknowledgment: Patrick Battistello
+
+"""
+Diameter protocol implementation for Scapy
+
+This implements the base Diameter protocol RFC6733 and the additional standards:  # noqa: E501
+    RFC7155, RFC4004, RFC4006, RFC4072, RFC4740, RFC5778, RFC5447, RFC6942, RFC5777  # noqa: E501
+    ETS29229 V12.3.0 (2014-09), ETS29272 V13.1.0 (2015-03), ETS29329 V12.5.0 (2014-12),  # noqa: E501
+    ETS29212 V13.1.0 (2015-03), ETS32299 V13.0.0 (2015-03), ETS29210 V6.7.0 (2006-12),  # noqa: E501
+    ETS29214 V13.1.0 (2015-03), ETS29273 V12.7.0 (2015-03), ETS29173 V12.3.0 (2015-03),  # noqa: E501
+    ETS29172 V12.5.0 (2015-03), ETS29215 V13.1.0 (2015-03), ETS29209 V6.8.0 (2011-09),  # noqa: E501
+    ETS29061 V13.0.0 (2015-03), ETS29219 V13.0.0 (2014-12)
+
+IMPORTANT note:
+    - Some Diameter fields (Unsigned64, Float32, ...) have not been tested yet due to lack  # noqa: E501
+        of network captures containing AVPs of that types contributions are welcomed.  # noqa: E501
+"""
 
 # scapy.contrib.description = Diameter
 # scapy.contrib.status = loads
@@ -32,9 +33,7 @@ from scapy.fields import ConditionalField, EnumField, Field, FieldLenField, \
     XByteField, XIntField
 from scapy.layers.inet import TCP
 from scapy.layers.sctp import SCTPChunkData
-import scapy.modules.six as six
-from scapy.modules.six.moves import range
-from scapy.compat import chb, orb, raw, bytes_hex, plain_str
+from scapy.compat import chb, raw, bytes_encode, bytes_hex, plain_str
 from scapy.error import warning
 from scapy.utils import inet_ntoa, inet_aton
 from scapy.pton_ntop import inet_pton, inet_ntop
@@ -85,7 +84,7 @@ class DRFlags (FlagsField):
             return "None"
         res = hex(int(x))
         r = ''
-        cmdt = (x & 128) and ' Request' or ' Answer'
+        cmdt = ' Request' if (x & 128) else ' Answer'
         if x & 15:  # Check if reserved bits are used
             nb = 8
             offset = 0
@@ -308,8 +307,8 @@ class QoSFilterRule (StrLenField):        # Defined in 4.1.1 of RFC7155
 class ISDN (StrLenField):
     def i2repr(self, pkt, x):
         out = b''
-        for char in x:
-            c = orb(char)
+        for char in bytes_encode(x):
+            c = char
             out += chb(48 + (c & 15))  # convert second digit first
             v = (c & 240) >> 4
             if v != 15:
@@ -320,8 +319,8 @@ class ISDN (StrLenField):
         out = b''
         if x:
             fd = True     # waiting for first digit
-            for c in x:
-                digit = orb(c) - 48
+            for c in bytes_encode(x):
+                digit = c - 48
                 if fd:
                     val = digit
                 else:
@@ -353,7 +352,7 @@ def GuessAvpType(p, **kargs):
         avpCode = struct.unpack("!I", p[:AVP_Code_length])[0]
         vnd = bool(struct.unpack(
             "!B", p[AVP_Code_length:AVP_Code_length + AVP_Flag_length])[0] & 128)  # noqa: E501
-        vndCode = vnd and struct.unpack("!I", p[8:12])[0] or 0
+        vndCode = struct.unpack("!I", p[8:12])[0] if vnd else 0
         # Check if vendor and code defined and fetch the corresponding AVP
         # definition
         if vndCode in AvpDefDict:
@@ -430,7 +429,7 @@ def AVP(avpId, **fields):
         if val:
             fields['avpFlags'] = val[2]
         else:
-            fields['avpFlags'] = vnd and 128 or 0
+            fields['avpFlags'] = 128 if vnd else 0
     # Finally, set the name and class if possible
     if val:
         classType = val[1]
@@ -2528,8 +2527,8 @@ class AVP_10415_1259 (AVP_FL_V):
             'val',
             None,
             {
-                1: "Pre-emptive priority: ",
-                2: "High priority: Lower than Pre-emptive priority",
+                1: "Preemptive priority: ",
+                2: "High priority: Lower than Preemptive priority",
                 3: "Normal priority: Normal level. Lower than High priority",
                 4: "Low priority: Lowest level priority",
             })]
@@ -4781,14 +4780,14 @@ def getCmdParams(cmd, request, **fields):
         val = fields['drAppId']
         if isinstance(val, str):   # Translate into application Id code
             found = False
-            for k, v in six.iteritems(AppIDsEnum):
+            for k, v in AppIDsEnum.items():
                 if v.find(val) != -1:
                     drAppId = k
                     fields['drAppId'] = drAppId
                     found = True
                     break
             if not found:
-                del(fields['drAppId'])
+                del fields['drAppId']
                 warning(
                     'Application ID with name %s not found in AppIDsEnum dictionary.' %  # noqa: E501
                     val)
@@ -4799,12 +4798,12 @@ def getCmdParams(cmd, request, **fields):
         drAppId = next(iter(params[2]))   # The first record is taken
         fields['drAppId'] = drAppId
     # Set the command name
-    name = request and params[0] + '-Request' or params[0] + '-Answer'
+    name = params[0] + '-Request' if request else params[0] + '-Answer'
     # Processing of flags (only if not provided manually)
     if 'drFlags' not in fields:
         if drAppId in params[2]:
             flags = params[2][drAppId]
-            fields['drFlags'] = request and flags[0] or flags[1]
+            fields['drFlags'] = flags[0] if request else flags[1]
     return (fields, name)
 
 
@@ -4829,7 +4828,5 @@ def DiamAns(cmd, **fields):
 
 bind_layers(TCP, DiamG, dport=3868)
 bind_layers(TCP, DiamG, sport=3868)
-bind_layers(SCTPChunkData, DiamG, dport=3868)
-bind_layers(SCTPChunkData, DiamG, sport=3868)
 bind_layers(SCTPChunkData, DiamG, proto_id=46)
 bind_layers(SCTPChunkData, DiamG, proto_id=47)

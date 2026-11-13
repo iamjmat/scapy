@@ -1,15 +1,18 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # This file is part of Scapy
-# See http://www.secdev.org/projects/scapy for more information
+# See https://scapy.net/ for more information
 # Copyright (C) Andreas Korb <andreas.d.korb@gmail.com>
 # Copyright (C) Nils Weiss <nils@we155.de>
-# This program is published under a GPLv2 license
 
 # scapy.contrib.status = skip
 
-from scapy.fields import FlagsField, ByteField, ScalingField, PacketListField
+from scapy.fields import (
+    ConditionalField, FlagsField, ByteField, ScalingField, PacketListField,
+    XByteEnumField
+)
 from scapy.packet import bind_layers, Packet
 from scapy.contrib.automotive.obd.packet import OBD_Packet
-from scapy.contrib.automotive.obd.services import OBD_S08
+from scapy.contrib.automotive.obd.services import OBD_S08, _OBD_SERVICES, _obd_slm
 
 
 class _OBD_TID_Voltage(OBD_Packet):
@@ -132,11 +135,12 @@ class OBD_S08_PR_Record(Packet):
 class OBD_S08_PR(Packet):
     name = "Control Operation IDs"
     fields_desc = [
+        ConditionalField(XByteEnumField('service', 0x48, _OBD_SERVICES), _obd_slm),
         PacketListField("data_records", [], OBD_S08_PR_Record)
     ]
 
     def answers(self, other):
-        return other.__class__ == OBD_S08 \
+        return isinstance(other, OBD_S08) \
             and all(r.tid in other.tid for r in self.data_records)
 
 

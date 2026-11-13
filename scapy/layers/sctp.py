@@ -1,17 +1,16 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # This file is part of Scapy
-# See http://www.secdev.org/projects/scapy for more information
+# See https://scapy.net/ for more information
 # Copyright (C) Philippe Biondi <phil@secdev.org>
 # Copyright (C) 6WIND <olivier.matz@6wind.com>
-# This program is published under a GPLv2 license
 
 """
 SCTP (Stream Control Transmission Protocol).
 """
 
-from __future__ import absolute_import
 import struct
 
-from scapy.compat import orb, raw
+from scapy.compat import raw
 from scapy.volatile import RandBin
 from scapy.config import conf
 from scapy.packet import Packet, bind_layers
@@ -25,6 +24,7 @@ from scapy.fields import (
     IntEnumField,
     IntField,
     MultipleTypeField,
+    PacketLenField,
     PacketListField,
     PadField,
     ShortEnumField,
@@ -35,9 +35,9 @@ from scapy.fields import (
     XIntField,
     XShortField,
 )
-from scapy.layers.inet import IP
-from scapy.layers.inet6 import IP6Field
-from scapy.layers.inet6 import IPv6
+from scapy.data import SCTP_SERVICES
+from scapy.layers.inet import IP, IPerror
+from scapy.layers.inet6 import IP6Field, IPv6, IPerror6, nh_clserror
 
 IPPROTO_SCTP = 132
 
@@ -113,7 +113,7 @@ crc32c_table = [
 def crc32c(buf):
     crc = 0xffffffff
     for c in buf:
-        crc = (crc >> 8) ^ crc32c_table[(crc ^ (orb(c))) & 0xFF]
+        crc = (crc >> 8) ^ crc32c_table[(crc ^ (c)) & 0xFF]
     crc = (~crc) & 0xffffffff
     # reverse endianness
     return struct.unpack(">I", struct.pack("<I", crc))[0]
@@ -125,13 +125,13 @@ BASE = 65521 # largest prime smaller than 65536
 def update_adler32(adler, buf):
     s1 = adler & 0xffff
     s2 = (adler >> 16) & 0xffff
-    print s1,s2
+    print(s1, s2)
 
     for c in buf:
-        print orb(c)
-        s1 = (s1 + orb(c)) % BASE
+        print(c)
+        s1 = (s1 + c) % BASE
         s2 = (s2 + s1) % BASE
-        print s1,s2
+        print(s1, s2)
     return (s2 << 16) + s1
 
 def sctp_checksum(buf):
@@ -160,8 +160,13 @@ sctpchunktypescls = {
     11: "SCTPChunkCookieAck",
     14: "SCTPChunkShutdownComplete",
     15: "SCTPChunkAuthentication",
+    64: "SCTPChunkIData",
+    130: "SCTPChunkReConfig",
+    132: "SCTPChunkPad",
     0x80: "SCTPChunkAddressConfAck",
+    192: "SCTPChunkForwardTSN",
     0xc1: "SCTPChunkAddressConf",
+    194: "SCTPChunkIForwardTSN",
 }
 
 sctpchunktypes = {
@@ -179,12 +184,17 @@ sctpchunktypes = {
     11: "cookie-ack",
     14: "shutdown-complete",
     15: "authentication",
+    64: "i-data",
+    130: "re-config",
+    132: "pad",
     0x80: "address-configuration-ack",
+    192: "forward-tsn",
     0xc1: "address-configuration",
+    194: "i-forward-tsn",
 }
 
 sctpchunkparamtypescls = {
-    1: "SCTPChunkParamHearbeatInfo",
+    1: "SCTPChunkParamHeartbeatInfo",
     5: "SCTPChunkParamIPv4Addr",
     6: "SCTPChunkParamIPv6Addr",
     7: "SCTPChunkParamStateCookie",
@@ -192,6 +202,12 @@ sctpchunkparamtypescls = {
     9: "SCTPChunkParamCookiePreservative",
     11: "SCTPChunkParamHostname",
     12: "SCTPChunkParamSupportedAddrTypes",
+    13: "SCTPChunkParamOutgoingSSNResetRequest",
+    14: "SCTPChunkParamIncomingSSNResetRequest",
+    15: "SCTPChunkParamSSNTSNResetRequest",
+    16: "SCTPChunkParamReConfigurationResponse",
+    17: "SCTPChunkParamAddOutgoingStreamRequest",
+    18: "SCTPChunkParamAddIncomingStreamRequest",
     0x8000: "SCTPChunkParamECNCapable",
     0x8002: "SCTPChunkParamRandom",
     0x8003: "SCTPChunkParamChunkList",
@@ -215,6 +231,12 @@ sctpchunkparamtypes = {
     9: "cookie-preservative",
     11: "hostname",
     12: "addrtypes",
+    13: "out-ssn-reset-req",
+    14: "in-ssn-reset-req",
+    15: "ssn-tsn-reset-req",
+    16: "re-configuration-response",
+    17: "add-outgoing-stream-req",
+    18: "add-incoming-stream-req",
     0x8000: "ecn-capable",
     0x8002: "random",
     0x8003: "chunk-list",
@@ -239,14 +261,14 @@ class _SCTPChunkGuessPayload:
         if len(p) < 4:
             return conf.padding_layer
         else:
-            t = orb(p[0])
+            t = p[0]
             return globals().get(sctpchunktypescls.get(t, "Raw"), conf.raw_layer)  # noqa: E501
 
 
 class SCTP(_SCTPChunkGuessPayload, Packet):
-    fields_desc = [ShortField("sport", None),
-                   ShortField("dport", None),
-                   XIntField("tag", None),
+    fields_desc = [ShortEnumField("sport", 0, SCTP_SERVICES),
+                   ShortEnumField("dport", 0, SCTP_SERVICES),
+                   XIntField("tag", 0),
                    XIntField("chksum", None), ]
 
     def answers(self, other):
@@ -265,7 +287,37 @@ class SCTP(_SCTPChunkGuessPayload, Packet):
             p = p[:8] + struct.pack(">I", crc) + p[12:]
         return p
 
+
+class SCTPerror(SCTP):
+    name = "SCTP in ICMP"
+
+    def answers(self, other):
+        if not isinstance(other, SCTP):
+            return 0
+        if conf.checkIPsrc:
+            if not ((self.sport == other.sport) and
+                    (self.dport == other.dport)):
+                return 0
+        return 1
+
+    def mysummary(self):
+        return Packet.mysummary(self)
+
+
+nh_clserror[IPPROTO_SCTP] = SCTPerror
+
 # SCTP Chunk variable params
+
+
+resultcode = {
+    0: "Success - Nothing to do",
+    1: "Success - Performed",
+    2: "Denied",
+    3: "Error - Wrong SSN",
+    4: "Error - Request already in progress",
+    5: "Error - Bad Sequence Number",
+    6: "In Progress"
+}
 
 
 class ChunkParamField(PacketListField):
@@ -275,7 +327,7 @@ class ChunkParamField(PacketListField):
     def m2i(self, p, m):
         cls = conf.raw_layer
         if len(m) >= 4:
-            t = orb(m[0]) * 256 + orb(m[1])
+            t = m[0] * 256 + m[1]
             cls = globals().get(sctpchunkparamtypescls.get(t, "Raw"), conf.raw_layer)  # noqa: E501
         return cls(m)
 
@@ -287,7 +339,7 @@ class _SCTPChunkParam:
         return b"", s[:]
 
 
-class SCTPChunkParamHearbeatInfo(_SCTPChunkParam, Packet):
+class SCTPChunkParamHeartbeatInfo(_SCTPChunkParam, Packet):
     fields_desc = [ShortEnumField("type", 1, sctpchunkparamtypes),
                    FieldLenField("len", None, length_of="data",
                                  adjust=lambda pkt, x:x + 4),
@@ -349,6 +401,62 @@ class SCTPChunkParamSupportedAddrTypes(_SCTPChunkParam, Packet):
                                            ShortEnumField("addr_type", 5, sctpchunkparamtypes),  # noqa: E501
                                            length_from=lambda pkt: pkt.len - 4),  # noqa: E501
                             4, padwith=b"\x00"), ]
+
+
+class SCTPChunkParamOutSSNResetReq(_SCTPChunkParam, Packet):
+    fields_desc = [ShortEnumField("type", 13, sctpchunkparamtypes),
+                   FieldLenField("len", None, length_of="stream_num_list",
+                                 adjust=lambda pkt, x:x + 16),
+                   XIntField("re_conf_req_seq_num", None),
+                   XIntField("re_conf_res_seq_num", None),
+                   XIntField("tsn", None),
+                   PadField(FieldListField("stream_num_list", [],
+                                           XShortField("stream_num", None),
+                                           length_from=lambda pkt: pkt.len - 16),
+                            4, padwith=b"\x00"),
+                   ]
+
+
+class SCTPChunkParamInSSNResetReq(_SCTPChunkParam, Packet):
+    fields_desc = [ShortEnumField("type", 14, sctpchunkparamtypes),
+                   FieldLenField("len", None, length_of="stream_num_list",
+                                 adjust=lambda pkt, x:x + 8),
+                   XIntField("re_conf_req_seq_num", None),
+                   PadField(FieldListField("stream_num_list", [],
+                                           XShortField("stream_num", None),
+                                           length_from=lambda pkt: pkt.len - 8),
+                            4, padwith=b"\x00"),
+                   ]
+
+
+class SCTPChunkParamSSNTSNResetReq(_SCTPChunkParam, Packet):
+    fields_desc = [ShortEnumField("type", 15, sctpchunkparamtypes),
+                   XShortField("len", 8),
+                   XIntField("re_conf_req_seq_num", None),
+                   ]
+
+
+class SCTPChunkParamReConfigRes(_SCTPChunkParam, Packet):
+    fields_desc = [ShortEnumField("type", 16, sctpchunkparamtypes),
+                   XShortField("len", 12),
+                   XIntField("re_conf_res_seq_num", None),
+                   IntEnumField("result", None, resultcode),
+                   XIntField("sender_next_tsn", None),
+                   XIntField("receiver_next_tsn", None),
+                   ]
+
+
+class SCTPChunkParamAddOutgoingStreamReq(_SCTPChunkParam, Packet):
+    fields_desc = [ShortEnumField("type", 17, sctpchunkparamtypes),
+                   XShortField("len", 12),
+                   XIntField("re_conf_req_seq_num", None),
+                   XShortField("num_new_stream", None),
+                   XShortField("reserved", None),
+                   ]
+
+
+class SCTPChunkParamAddIncomingStreamReq(SCTPChunkParamAddOutgoingStreamReq):
+    type = 18
 
 
 class SCTPChunkParamECNCapable(_SCTPChunkParam, Packet):
@@ -519,6 +627,23 @@ SCTP_PAYLOAD_PROTOCOL_INDENTIFIERS = {
 }
 
 
+class _SCTPChunkDataField(PacketLenField):
+    """PacketLenField that dispatches using bind_layers bindings."""
+
+    def m2i(self, pkt, m):
+        # Only dissect complete messages
+        if pkt.beginning != 1 or pkt.ending != 1:
+            return conf.raw_layer(load=m)
+        # Check bind_layers bindings
+        for fval, cls in pkt.payload_guess:
+            if all(
+                hasattr(pkt, k) and v == pkt.getfieldval(k)
+                for k, v in fval.items()
+            ):
+                return cls(m)
+        return conf.raw_layer(load=m)
+
+
 class SCTPChunkData(_SCTPChunkGuessPayload, Packet):
     # TODO : add a padding function in post build if this layer is used to generate SCTP chunk data  # noqa: E501
     fields_desc = [ByteEnumField("type", 0, sctpchunktypes),
@@ -532,9 +657,67 @@ class SCTPChunkData(_SCTPChunkGuessPayload, Packet):
                    XShortField("stream_id", None),
                    XShortField("stream_seq", None),
                    IntEnumField("proto_id", None, SCTP_PAYLOAD_PROTOCOL_INDENTIFIERS),  # noqa: E501
-                   PadField(StrLenField("data", None, length_from=lambda pkt: pkt.len - 16),  # noqa: E501
+                   PadField(_SCTPChunkDataField("data", None, conf.raw_layer,
+                                                length_from=lambda pkt: pkt.len - 16),  # noqa: E501
                             4, padwith=b"\x00"),
                    ]
+
+
+class SCTPChunkIData(_SCTPChunkGuessPayload, Packet):
+    fields_desc = [ByteEnumField("type", 64, sctpchunktypes),
+                   BitField("reserved", None, 4),
+                   BitField("delay_sack", 0, 1),    # immediate bit
+                   BitField("unordered", 0, 1),
+                   BitField("beginning", 0, 1),
+                   BitField("ending", 0, 1),
+                   FieldLenField("len", None, length_of="data",
+                                 adjust=lambda pkt, x:x + 20),
+                   XIntField("tsn", None),
+                   XShortField("stream_id", None),
+                   XShortField("reserved_16", None),
+                   XIntField("message_id", None),
+                   MultipleTypeField(
+                       [
+                           (IntEnumField("ppid_fsn", None,
+                                         SCTP_PAYLOAD_PROTOCOL_INDENTIFIERS),
+                            lambda pkt: pkt.beginning == 1),
+                           (XIntField("ppid_fsn", None),
+                            lambda pkt: pkt.beginning == 0),
+                       ],
+                       XIntField("ppid_fsn", None)),
+                   PadField(StrLenField("data", None,
+                                        length_from=lambda pkt: pkt.len - 20),
+                            4, padwith=b"\x00"),
+                   ]
+
+
+class SCTPForwardSkip(_SCTPChunkParam, Packet):
+    fields_desc = [ShortField("stream_id", None),
+                   ShortField("stream_seq", None)
+                   ]
+
+
+class SCTPChunkForwardTSN(_SCTPChunkGuessPayload, Packet):
+    fields_desc = [ByteEnumField("type", 192, sctpchunktypes),
+                   XByteField("flags", None),
+                   FieldLenField("len", None, length_of="skips",
+                                 adjust=lambda pkt, x:x + 8),
+                   IntField("new_tsn", None),
+                   ChunkParamField("skips", None,
+                                   length_from=lambda pkt: pkt.len - 8)
+                   ]
+
+
+class SCTPIForwardSkip(_SCTPChunkParam, Packet):
+    fields_desc = [ShortField("stream_id", None),
+                   BitField("reserved", None, 15),
+                   BitField("unordered", None, 1),
+                   IntField("message_id", None)
+                   ]
+
+
+class SCTPChunkIForwardTSN(SCTPChunkForwardTSN):
+    type = 194
 
 
 class SCTPChunkInit(_SCTPChunkGuessPayload, Packet):
@@ -684,9 +867,31 @@ class SCTPChunkAddressConf(_SCTPChunkGuessPayload, Packet):
                    ]
 
 
+class SCTPChunkReConfig(_SCTPChunkGuessPayload, Packet):
+    fields_desc = [ByteEnumField("type", 130, sctpchunktypes),
+                   XByteField("flags", None),
+                   FieldLenField("len", None, length_of="params",
+                                 adjust=lambda pkt, x:x + 4),
+                   ChunkParamField("params", None, length_from=lambda pkt: pkt.len - 4),
+                   ]
+
+
+class SCTPChunkPad(_SCTPChunkGuessPayload, Packet):
+    fields_desc = [ByteEnumField("type", 132, sctpchunktypes),
+                   XByteField("flags", None),
+                   FieldLenField("len", None, length_of="padding",
+                                 adjust=lambda pkt, x:x + 8),
+                   PadField(StrLenField("padding", None,
+                                        length_from=lambda pkt: pkt.len - 8),
+                            4, padwith=b"\x00")
+                   ]
+
+
 class SCTPChunkAddressConfAck(SCTPChunkAddressConf):
     type = 0x80
 
 
 bind_layers(IP, SCTP, proto=IPPROTO_SCTP)
+bind_layers(IPerror, SCTPerror, proto=IPPROTO_SCTP)
 bind_layers(IPv6, SCTP, nh=IPPROTO_SCTP)
+bind_layers(IPerror6, SCTPerror, proto=IPPROTO_SCTP)

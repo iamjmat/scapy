@@ -1,29 +1,18 @@
-#! /usr/bin/env python
-
+# SPDX-License-Identifier: GPL-2.0-or-later
+# This file is part of Scapy
+# See https://scapy.net/ for more information
 # Copyright (C) 2019 Travelping GmbH <info@travelping.com>
 
-# This file is part of Scapy
-# Scapy is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 2 of the License, or
-# any later version.
-#
-# Scapy is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Scapy. If not, see <http://www.gnu.org/licenses/>.
-
-# 3GPP TS 29.244
+"""
+3GPP TS 29.244
+"""
 
 # scapy.contrib.description = 3GPP Packet Forwarding Control Protocol
 # scapy.contrib.status = loads
 
 import struct
 
-from scapy.compat import chb, orb
+from scapy.compat import chb
 from scapy.error import warning
 from scapy.fields import Field, BitEnumField, BitField, ByteEnumField, \
     ShortEnumField, ByteField, IntField, LongField, \
@@ -427,7 +416,7 @@ class APNStrLenField(StrLenField):
         ret_s = b""
         tmp_s = s
         while tmp_s:
-            tmp_len = orb(tmp_s[0]) + 1
+            tmp_len = tmp_s[0] + 1
             if tmp_len > len(tmp_s):
                 warning("APN prematured end of character-string (size=%i, remaining bytes=%i)" % (tmp_len, len(tmp_s)))  # noqa: E501
             ret_s += tmp_s[1:tmp_len]
@@ -479,7 +468,7 @@ def IE_Dispatcher(s):
     """Choose the correct Information Element class."""
 
     # Get the IE type
-    ietype = (orb(s[0]) * 256) + orb(s[1])
+    ietype = (s[0] * 256) + s[1]
     if ietype & 0x8000:
         return IE_EnterpriseSpecific(s)
 

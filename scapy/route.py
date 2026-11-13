@@ -1,14 +1,12 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # This file is part of Scapy
-# See http://www.secdev.org/projects/scapy for more information
+# See https://scapy.net/ for more information
 # Copyright (C) Philippe Biondi <phil@secdev.org>
-# This program is published under a GPLv2 license
 
 """
 Routing and handling of network interfaces.
 """
 
-
-from __future__ import absolute_import
 
 from scapy.compat import plain_str
 from scapy.config import conf
@@ -16,7 +14,7 @@ from scapy.error import Scapy_Exception, warning
 from scapy.interfaces import resolve_iface
 from scapy.utils import atol, ltoa, itom, pretty_list
 
-from scapy.compat import (
+from typing import (
     Any,
     Dict,
     List,
@@ -34,11 +32,13 @@ class Route:
     def __init__(self):
         # type: () -> None
         self.routes = []  # type: List[Tuple[int, int, str, str, str, int]]
-        self.resync()
+        self.invalidate_cache()
+        if conf.route_autoload:
+            self.resync()
 
     def invalidate_cache(self):
         # type: () -> None
-        self.cache = {}  # type: Dict[str, Tuple[str, str, str]]
+        self.cache = {}  # type: Dict[Tuple[str, Optional[str]], Tuple[str, str, str]]
 
     def resync(self):
         # type: () -> None
@@ -69,7 +69,6 @@ class Route:
                    metric=1,  # type: int
                    ):
         # type: (...) -> Tuple[int, int, str, str, str, int]
-        from scapy.arch import get_if_addr
         if host is not None:
             thenet, msk = host, 32
         elif net is not None:
@@ -86,25 +85,46 @@ class Route:
                 nhop = thenet
             dev, ifaddr, _ = self.route(nhop)
         else:
-            ifaddr = get_if_addr(dev)
+            ifaddr = "0.0.0.0"  # acts as a 'via' in `ip addr add`
         return (atol(thenet), itom(msk), gw, dev, ifaddr, metric)
 
     def add(self, *args, **kargs):
         # type: (*Any, **Any) -> None
-        """Ex:
-        add(net="192.168.1.0/24",gw="1.2.3.4")
+        """Add a route to Scapy's IPv4 routing table.
+        add(host|net, gw|dev)
+
+        :param host: single IP to consider (/32)
+        :param net: range to consider
+        :param gw: gateway
+        :param dev: force the interface to use
+        :param metric: route metric
+
+        Examples:
+
+        - `ip route add 192.168.1.0/24 via 192.168.0.254`::
+            >>> conf.route.add(net="192.168.1.0/24", gw="192.168.0.254")
+
+        - `ip route add 192.168.1.0/24 dev eth0`::
+            >>> conf.route.add(net="192.168.1.0/24", dev="eth0")
+
+        - `ip route add 192.168.1.0/24 via 192.168.0.254 metric 1`::
+            >>> conf.route.add(net="192.168.1.0/24", gw="192.168.0.254", metric=1)
         """
         self.invalidate_cache()
         self.routes.append(self.make_route(*args, **kargs))
 
     def delt(self, *args, **kargs):
         # type: (*Any, **Any) -> None
-        """delt(host|net, gw|dev)"""
+        """Remove a route from Scapy's IPv4 routing table.
+        delt(host|net, gw|dev)
+
+        Same syntax as add()
+        """
         self.invalidate_cache()
         route = self.make_route(*args, **kargs)
         try:
             i = self.routes.index(route)
-            del(self.routes[i])
+            del self.routes[i]
         except ValueError:
             raise ValueError("No matching route found!")
 
@@ -145,16 +165,18 @@ class Route:
         the_net = the_rawaddr & the_msk
         self.routes.append((the_net, the_msk, '0.0.0.0', iff, the_addr, 1))
 
-    def route(self, dst=None, verbose=conf.verb):
-        # type: (Optional[str], int) -> Tuple[str, str, str]
+    def route(self, dst=None, dev=None, verbose=conf.verb, _internal=False):
+        # type: (Optional[str], Optional[str], int, bool) -> Tuple[str, str, str]
         """Returns the IPv4 routes to a host.
-        parameters:
-         - dst: the IPv4 of the destination host
 
-        returns: (iface, output_ip, gateway_ip)
-         - iface: the interface used to connect to the host
-         - output_ip: the outgoing IP that will be used
-         - gateway_ip: the gateway IP that will be used
+        :param dst: the IPv4 of the destination host
+        :param dev: (optional) filtering is performed to limit search to route
+                    associated to that interface.
+
+        :returns: tuple (iface, output_ip, gateway_ip) where
+            - ``iface``: the interface used to connect to the host
+            - ``output_ip``: the outgoing IP that will be used
+            - ``gateway_ip``: the gateway IP that will be used
         """
         dst = dst or "0.0.0.0"  # Enable route(None) to return default route
         if isinstance(dst, bytes):
@@ -162,8 +184,8 @@ class Route:
                 dst = plain_str(dst)
             except UnicodeDecodeError:
                 raise TypeError("Unknown IP address input (bytes)")
-        if dst in self.cache:
-            return self.cache[dst]
+        if (dst, dev) in self.cache:
+            return self.cache[(dst, dev)]
         # Transform "192.168.*.1-5" to one IP of the set
         _dst = dst.split("/")[0].replace("*", "0")
         while True:
@@ -178,8 +200,10 @@ class Route:
         for d, m, gw, i, a, me in self.routes:
             if not a:  # some interfaces may not currently be connected
                 continue
+            if dev is not None and i != dev:
+                continue
             aa = atol(a)
-            if aa == atol_dst:
+            if aa == atol_dst and aa != 0:
                 paths.append(
                     (0xffffffff, 1, (conf.loopback_name, a, "0.0.0.0"))  # noqa: E501
                 )
@@ -188,20 +212,28 @@ class Route:
 
         if not paths:
             if verbose:
-                warning("No route found (no default route?)")
-            return conf.loopback_name, "0.0.0.0", "0.0.0.0"
+                warning("No route found for IPv4 destination %s "
+                        "(no default route?)", dst)
+            return (dev or conf.loopback_name, "0.0.0.0", "0.0.0.0")
         # Choose the more specific route
         # Sort by greatest netmask and use metrics as a tie-breaker
         paths.sort(key=lambda x: (-x[0], x[1]))
         # Return interface
         ret = paths[0][2]
-        self.cache[dst] = ret
+        # Check if source is 0.0.0.0. This is a 'via' route with no src.
+        if ret[1] == "0.0.0.0" and not _internal:
+            # Then get the source from route(gw)
+            ret = (ret[0], self.route(ret[2], _internal=True)[1], ret[2])
+        self.cache[(dst, dev)] = ret
         return ret
 
     def get_if_bcast(self, iff):
         # type: (str) -> List[str]
+        """
+        Return the list of broadcast addresses of an interface.
+        """
         bcast_list = []
-        for net, msk, gw, iface, addr, metric in self.routes:
+        for net, msk, _, iface, _, _ in self.routes:
             if net == 0:
                 continue    # Ignore default route "0.0.0.0"
             elif msk == 0xffffffff:
@@ -217,5 +249,5 @@ class Route:
 
 conf.route = Route()
 
-# Load everything, update conf.iface
-conf.ifaces.reload()
+# Update conf.iface
+conf.ifaces.load_confiface()

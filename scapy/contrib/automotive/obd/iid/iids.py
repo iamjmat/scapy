@@ -1,16 +1,19 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # This file is part of Scapy
-# See http://www.secdev.org/projects/scapy for more information
+# See https://scapy.net/ for more information
 # Copyright (C) Andreas Korb <andreas.d.korb@gmail.com>
 # Copyright (C) Nils Weiss <nils@we155.de>
-# This program is published under a GPLv2 license
 
 # scapy.contrib.status = skip
 
-from scapy.fields import FieldLenField, FieldListField, StrFixedLenField, \
-    ByteField, ShortField, FlagsField, XByteField, PacketListField
+from scapy.fields import (
+    ConditionalField, FieldLenField, FieldListField, StrFixedLenField,
+    ByteField, ShortField, FlagsField, XByteEnumField, XByteField,
+    PacketListField
+)
 from scapy.packet import Packet, bind_layers
 from scapy.contrib.automotive.obd.packet import OBD_Packet
-from scapy.contrib.automotive.obd.services import OBD_S09
+from scapy.contrib.automotive.obd.services import OBD_S09, _OBD_SERVICES, _obd_slm
 
 
 # See https://en.wikipedia.org/wiki/OBD-II_PIDs#Service_09
@@ -26,11 +29,12 @@ class OBD_S09_PR_Record(Packet):
 class OBD_S09_PR(Packet):
     name = "Infotype IDs"
     fields_desc = [
+        ConditionalField(XByteEnumField('service', 0x49, _OBD_SERVICES), _obd_slm),
         PacketListField("data_records", [], OBD_S09_PR_Record)
     ]
 
     def answers(self, other):
-        return other.__class__ == OBD_S09 \
+        return isinstance(other, OBD_S09) \
             and all(r.iid in other.iid for r in self.data_records)
 
 

@@ -1,19 +1,18 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # This file is part of Scapy
+# See https://scapy.net/ for more information
 # Copyright (C) 2007, 2008, 2009 Arnaud Ebalard
-# 2015, 2016, 2017 Maxence Tury
-# This program is published under a GPLv2 license
+#               2015, 2016, 2017 Maxence Tury
 
 """
 TLS Pseudorandom Function.
 """
 
-from __future__ import absolute_import
 from scapy.error import warning
 from scapy.utils import strxor
 
 from scapy.layers.tls.crypto.hash import _tls_hash_algs
 from scapy.layers.tls.crypto.h_mac import _tls_hmac_algs
-from scapy.modules.six.moves import range
 from scapy.compat import bytes_encode
 
 
@@ -74,7 +73,7 @@ def _tls_P_SHA512(secret, seed, req_len):
 # PRF functions, according to the protocol version
 
 def _sslv2_PRF(secret, seed, req_len):
-    hash_md5 = _tls_hash_algs["MD5"]()
+    hash_md5 = _tls_hash_algs["md5"]()
     rounds = (req_len + hash_md5.hash_len - 1) // hash_md5.hash_len
 
     res = b""
@@ -109,8 +108,8 @@ def _ssl_PRF(secret, seed, req_len):
          b"M", b"N", b"O", b"P", b"Q", b"R", b"S", b"T", b"U", b"V", b"W", b"X",  # noqa: E501
          b"Y", b"Z"]
     res = b""
-    hash_sha1 = _tls_hash_algs["SHA"]()
-    hash_md5 = _tls_hash_algs["MD5"]()
+    hash_sha1 = _tls_hash_algs["sha"]()
+    hash_md5 = _tls_hash_algs["md5"]()
     rounds = (req_len + hash_md5.hash_len - 1) // hash_md5.hash_len
 
     for i in range(rounds):
@@ -186,7 +185,7 @@ class PRF(object):
     context of the connection state using the tls_version and the cipher suite.
     """
 
-    def __init__(self, hash_name="SHA256", tls_version=0x0303):
+    def __init__(self, hash_name="sha256", tls_version=0x0303):
         self.tls_version = tls_version
         self.hash_name = hash_name
 
@@ -198,13 +197,13 @@ class PRF(object):
               tls_version == 0x0302):       # TLS 1.1
             self.prf = _tls_PRF
         elif tls_version == 0x0303:         # TLS 1.2
-            if hash_name == "SHA384":
+            if hash_name == "sha384":
                 self.prf = _tls12_SHA384PRF
-            elif hash_name == "SHA512":
+            elif hash_name == "sha512":
                 self.prf = _tls12_SHA512PRF
             else:
-                if hash_name in ["MD5", "SHA"]:
-                    self.hash_name = "SHA256"
+                if hash_name in ["md5", "sha"]:
+                    self.hash_name = "sha256"
                 self.prf = _tls12_SHA256PRF
         else:
             warning("Unknown TLS version")
@@ -271,8 +270,8 @@ class PRF(object):
             sslv3_sha1_pad1 = b"\x36" * 40
             sslv3_sha1_pad2 = b"\x5c" * 40
 
-            md5 = _tls_hash_algs["MD5"]()
-            sha1 = _tls_hash_algs["SHA"]()
+            md5 = _tls_hash_algs["md5"]()
+            sha1 = _tls_hash_algs["sha"]()
 
             md5_hash = md5.digest(master_secret + sslv3_md5_pad2 +
                                   md5.digest(handshake_msg + label +
@@ -291,8 +290,8 @@ class PRF(object):
             label = ("%s finished" % d[con_end]).encode()
 
             if self.tls_version <= 0x0302:
-                s1 = _tls_hash_algs["MD5"]().digest(handshake_msg)
-                s2 = _tls_hash_algs["SHA"]().digest(handshake_msg)
+                s1 = _tls_hash_algs["md5"]().digest(handshake_msg)
+                s2 = _tls_hash_algs["sha"]().digest(handshake_msg)
                 verify_data = self.prf(master_secret, label, s1 + s2, 12)
             else:
                 h = _tls_hash_algs[self.hash_name]()
@@ -318,7 +317,7 @@ class PRF(object):
                 tbh = key + client_random + server_random
             else:
                 tbh = key + server_random + client_random
-            export_key = _tls_hash_algs["MD5"]().digest(tbh)[:req_len]
+            export_key = _tls_hash_algs["md5"]().digest(tbh)[:req_len]
         else:
             if s:
                 tag = b"client write key"
@@ -347,7 +346,7 @@ class PRF(object):
                 tbh = client_random + server_random
             else:
                 tbh = server_random + client_random
-            iv = _tls_hash_algs["MD5"]().digest(tbh)[:req_len]
+            iv = _tls_hash_algs["md5"]().digest(tbh)[:req_len]
         else:
             iv_block = self.prf("",
                                 b"IV block",

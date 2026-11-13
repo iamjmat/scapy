@@ -12,18 +12,22 @@
 get_if_raw_addr(conf.iface)
 
 
-= Get the packed MAC address of conf.iface
+= Get the MAC address of conf.iface
 
-get_if_raw_hwaddr(conf.iface)
+get_if_hwaddr(conf.iface)
 
-= Get the packed MAC address of conf.loopback_name
+= Get the MAC address of conf.loopback_name
 
-get_if_raw_hwaddr(conf.loopback_name) == (ARPHDR_LOOPBACK, b'\x00'*6) 
+get_if_hwaddr(conf.loopback_name) == "00:00:00:00:00:00"
 
 
 ############
 ############
 + BPF related functions
+
+= Imports
+
+from scapy.arch.bpf.supersocket import L3bpfSocket, L2bpfListenSocket, L2bpfSocket
 
 = Get a BPF handler
 ~ needs_root
@@ -32,7 +36,7 @@ from scapy.arch.bpf.supersocket import get_dev_bpf
 fd, _ = get_dev_bpf()
 
 = Attach a BPF filter
-~ needs_root
+~ needs_root libpcap
 
 from scapy.arch.bpf.supersocket import attach_filter
 attach_filter(fd, "arp or icmp", conf.iface)
@@ -46,8 +50,7 @@ len(iflist) > 0
 = Misc functions
 ~ needs_root
 
-from scapy.arch.bpf.supersocket import isBPFSocket, bpf_select
-isBPFSocket(L2bpfListenSocket()) and isBPFSocket(L2bpfSocket()) and isBPFSocket(L3bpfSocket())
+from scapy.arch.bpf.supersocket import bpf_select
 
 l = bpf_select([L2bpfSocket()])
 l = bpf_select([L2bpfSocket(), sys.stdin.fileno()])
@@ -111,7 +114,7 @@ s.close()
 = L2bpfListenSocket - read failure
 ~ needs_root
 
-import mock
+from unittest import mock
 
 @mock.patch("scapy.arch.bpf.supersocket.os.read")
 def _test_osread(osread):
@@ -141,3 +144,23 @@ s.send(IP(dst="8.8.8.8")/ICMP())
 s = L3bpfSocket()             
 s.assigned_interface = conf.loopback_name
 s.send(IP(dst="8.8.8.8")/ICMP())
+
+= L3bpfSocket - send and sniff on loopback
+~ needs_root
+
+localhost_ip = conf.ifaces[conf.loopback_name].ips[4][0]
+
+def cb():
+    # Send a ping to the loopback IP.
+    s = L3bpfSocket(iface=conf.loopback_name)
+    s.send(IP(dst=localhost_ip)/ICMP(seq=1001))
+
+t = AsyncSniffer(iface=conf.loopback_name, started_callback=cb)
+t.start()
+time.sleep(1)
+t.stop()
+t.join(timeout=1)
+
+# We expect to see our packet and kernel's response.
+len(t.results.filter(lambda p: (
+    IP in p and ICMP in p and (p[IP].src == localhost_ip or p[IP].dst == localhost_ip) and p[ICMP].seq == 1001))) == 2

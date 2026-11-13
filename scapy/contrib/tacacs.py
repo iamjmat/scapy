@@ -1,20 +1,14 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
 # This file is part of Scapy
-# Scapy is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 2 of the License, or
-# any later version.
-#
-# Scapy is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Scapy. If not, see <http://www.gnu.org/licenses/>.
-
+# See https://scapy.net/ for more information
 # Copyright (C) 2017 Francois Contat <francois.contat@ssi.gouv.fr>
 
-# Based on tacacs+ v6 draft https://tools.ietf.org/html/draft-ietf-opsawg-tacacs-06  # noqa: E501
+"""
+TACACS
+
+Based on tacacs+ v6 draft
+https://tools.ietf.org/html/draft-ietf-opsawg-tacacs-06
+"""
 
 # scapy.contrib.description = Terminal Access Controller Access-Control System+
 # scapy.contrib.status = loads
@@ -27,9 +21,8 @@ from scapy.fields import ByteEnumField, ByteField, IntField
 from scapy.fields import FieldListField
 from scapy.fields import FieldLenField, ConditionalField, StrLenField
 from scapy.layers.inet import TCP
-from scapy.compat import chb, orb
+from scapy.compat import chb
 from scapy.config import conf
-from scapy.modules.six.moves import range
 
 SECRET = 'test'
 
@@ -60,7 +53,7 @@ def obfuscate(pay, secret, session_id, version, seq):
 
     # Obf/Unobfuscation via XOR operation between plaintext and pad
 
-    return b"".join(chb(orb(pad[i]) ^ orb(pay[i])) for i in range(len(pay)))
+    return b"".join(chb(pad[i] ^ pay[i]) for i in range(len(pay)))
 
 
 TACACSPRIVLEVEL = {15: 'Root',
@@ -367,9 +360,10 @@ class TacacsClientPacket(Packet):
 
     def post_dissect(self, pay):
 
-        if self.flags == 0:
+        if self.flags & 1 == 0:
             pay = obfuscate(pay, SECRET, self.session_id, self.version, self.seq)  # noqa: E501
-            return pay
+
+        return pay
 
 
 class TacacsHeader(TacacsClientPacket):
@@ -398,9 +392,11 @@ class TacacsHeader(TacacsClientPacket):
         if self.type == 1:
             if self.seq % 2 == 0:
                 return TacacsAuthenticationReply
-            if sum(struct.unpack('bbbb', payload[4:8])) == len(payload[8:]):
+            if (len(payload) >= 8 and
+                    sum(struct.unpack('bbbb', payload[4:8])) == len(payload[8:])):
                 return TacacsAuthenticationStart
-            elif sum(struct.unpack('!hh', payload[:4])) == len(payload[5:]):
+            elif (len(payload) >= 4 and
+                  sum(struct.unpack('!hh', payload[:4])) == len(payload[5:])):
                 return TacacsAuthenticationContinue
 
         # Authorization packet - type 2
@@ -426,12 +422,10 @@ class TacacsHeader(TacacsClientPacket):
         if self.length is None and pay:
             p = p[:-4] + struct.pack('!I', len(pay))
 
-        if self.flags == 0:
-
+        if self.flags & 1 == 0:
             pay = obfuscate(pay, SECRET, self.session_id, self.version, self.seq)  # noqa: E501
-            return p + pay
 
-        return p
+        return p + pay
 
     def hashret(self):
         return struct.pack('I', self.session_id)

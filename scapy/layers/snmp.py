@@ -1,22 +1,21 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # This file is part of Scapy
-# See http://www.secdev.org/projects/scapy for more information
+# See https://scapy.net/ for more information
 # Copyright (C) Philippe Biondi <phil@secdev.org>
-# This program is published under a GPLv2 license
 
 """
 SNMP (Simple Network Management Protocol).
 """
 
-from __future__ import print_function
 from scapy.packet import bind_layers, bind_bottom_up
 from scapy.asn1packet import ASN1_Packet
 from scapy.asn1fields import ASN1F_INTEGER, ASN1F_IPADDRESS, ASN1F_OID, \
     ASN1F_SEQUENCE, ASN1F_SEQUENCE_OF, ASN1F_STRING, ASN1F_TIME_TICKS, \
-    ASN1F_enum_INTEGER, ASN1F_field, ASN1F_CHOICE
+    ASN1F_enum_INTEGER, ASN1F_field, ASN1F_CHOICE, ASN1F_optional, ASN1F_NULL
 from scapy.asn1.asn1 import ASN1_Class_UNIVERSAL, ASN1_Codecs, ASN1_NULL, \
     ASN1_SEQUENCE
 from scapy.asn1.ber import BERcodec_SEQUENCE
-from scapy.sendrecv import sr1
+from scapy.sendrecv import sr, sr1
 from scapy.volatile import RandShort, IntAutoTime
 from scapy.layers.inet import UDP, IP, ICMP
 
@@ -178,9 +177,17 @@ SNMP_trap_types = {0: "cold_start",
 
 class SNMPvarbind(ASN1_Packet):
     ASN1_codec = ASN1_Codecs.BER
-    ASN1_root = ASN1F_SEQUENCE(ASN1F_OID("oid", "1.3"),
-                               ASN1F_field("value", ASN1_NULL(0))
-                               )
+    ASN1_root = ASN1F_SEQUENCE(
+        ASN1F_OID("oid", "1.3"),
+        ASN1F_optional(
+            ASN1F_field("value", ASN1_NULL(0))
+        ),
+
+        # exceptions in responses
+        ASN1F_optional(ASN1F_NULL("noSuchObject", None, implicit_tag=0x80)),
+        ASN1F_optional(ASN1F_NULL("noSuchInstance", None, implicit_tag=0x81)),
+        ASN1F_optional(ASN1F_NULL("endOfMibView", None, implicit_tag=0x82)),
+    )
 
 
 class SNMPget(ASN1_Packet):
@@ -269,9 +276,7 @@ class SNMP(ASN1_Packet):
 
     def answers(self, other):
         return (isinstance(self.PDU, SNMPresponse) and
-                (isinstance(other.PDU, SNMPget) or
-                 isinstance(other.PDU, SNMPnext) or
-                 isinstance(other.PDU, SNMPset)) and
+                isinstance(other.PDU, (SNMPget, SNMPnext, SNMPset)) and
                 self.PDU.id == other.PDU.id)
 
 
@@ -282,10 +287,51 @@ bind_bottom_up(UDP, SNMP, dport=162)
 bind_layers(UDP, SNMP, sport=161, dport=161)
 
 
+def snmpget(dst, oid="1.0.8802.1.1.1.1.1.2.1.2.29", community="public"):
+    """
+    SNMP get.
+
+    This can be used to perform a SNMP scan::
+
+        >>> snmpget("192.168.0.0/16", community="public")
+    """
+    ans, _ = sr(
+        IP(dst=dst) / UDP(sport=RandShort()) / SNMP(
+            community=community,
+            PDU=SNMPnext(varbindlist=[SNMPvarbind(oid=oid)]),
+        ),
+        timeout=2,
+        chainCC=1,
+        verbose=0,
+        retry=2,
+    )
+    for r in ans:
+        if ICMP in r.answer:
+            print(repr(r.answer))
+            return
+        print("[%-10s] %-40s: %r" % (
+            r.query.dst,
+            r.answer[SNMPvarbind].oid.val,
+            r.answer[SNMPvarbind].value,
+        ))
+
+
 def snmpwalk(dst, oid="1", community="public"):
+    """
+    SNMP walk
+    """
     try:
         while True:
-            r = sr1(IP(dst=dst) / UDP(sport=RandShort()) / SNMP(community=community, PDU=SNMPnext(varbindlist=[SNMPvarbind(oid=oid)])), timeout=2, chainCC=1, verbose=0, retry=2)  # noqa: E501
+            r = sr1(
+                IP(dst=dst) / UDP(sport=RandShort()) / SNMP(
+                    community=community,
+                    PDU=SNMPnext(varbindlist=[SNMPvarbind(oid=oid)]),
+                ),
+                timeout=2,
+                chainCC=1,
+                verbose=0,
+                retry=2,
+            )
             if r is None:
                 print("No answers")
                 break
@@ -293,6 +339,8 @@ def snmpwalk(dst, oid="1", community="public"):
                 print(repr(r))
                 break
             print("%-40s: %r" % (r[SNMPvarbind].oid.val, r[SNMPvarbind].value))
+            if r[SNMPvarbind].endOfMibView is not None:
+                break
             oid = r[SNMPvarbind].oid
 
     except KeyboardInterrupt:

@@ -1,16 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
 # This file is part of Scapy
-# Scapy is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 2 of the License, or
-# any later version.
-#
-# Scapy is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Scapy. If not, see <http://www.gnu.org/licenses/>.
+# See https://scapy.net/ for more information
+# Copyright (C) 2014-2016 BENOCS GmbH, Berlin (Germany)
+# Copyright (C) 2020 Metaswitch, London (UK)
 
 # scapy.contrib.description = Intermediate System to Intermediate System (ISIS)
 # scapy.contrib.status = loads
@@ -19,24 +11,9 @@
     IS-IS Scapy Extension
     ~~~~~~~~~~~~~~~~~~~~~
 
-    :copyright: 2014-2016 BENOCS GmbH, Berlin (Germany)
-    :author:    Marcel Patzlaff, mpatzlaff@benocs.com
-                Michal Kaliszan, mkaliszan@benocs.com
-
-    :copyright: 2020 Metaswitch, London (UK)
-    :author:    Tom Zhu, tom.zhu@metaswitch.com
-
-    :license:   GPLv2
-
-        This module is free software; you can redistribute it and/or
-        modify it under the terms of the GNU General Public License
-        as published by the Free Software Foundation; either version 2
-        of the License, or (at your option) any later version.
-
-        This module is distributed in the hope that it will be useful,
-        but WITHOUT ANY WARRANTY; without even the implied warranty of
-        MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-        GNU General Public License for more details.
+    :authors:    Marcel Patzlaff, mpatzlaff@benocs.com
+                 Michal Kaliszan, mkaliszan@benocs.com
+                 Tom Zhu, tom.zhu@metaswitch.com
 
     :description:
 
@@ -65,7 +42,6 @@
 
 """
 
-from __future__ import absolute_import
 import struct
 import random
 
@@ -80,8 +56,7 @@ from scapy.layers.clns import network_layer_protocol_ids, register_cln_protocol
 from scapy.layers.inet6 import IP6ListField, IP6Field
 from scapy.utils import fletcher16_checkbytes
 from scapy.volatile import RandString, RandByte
-from scapy.modules.six.moves import range
-from scapy.compat import orb, hex_bytes
+from scapy.compat import hex_bytes
 
 EXT_VERSION = "v0.0.3"
 
@@ -99,7 +74,7 @@ def isis_str2area(s):
 
     numbytes = len(s[1:])
     fmt = "%02X" + (".%02X%02X" * (numbytes // 2)) + ("" if (numbytes % 2) == 0 else ".%02X")  # noqa: E501
-    return fmt % tuple(orb(x) for x in s)
+    return fmt % tuple(x for x in s)
 
 
 def isis_sysid2str(sysid):
@@ -107,7 +82,7 @@ def isis_sysid2str(sysid):
 
 
 def isis_str2sysid(s):
-    return ("%02X%02X." * 3)[:-1] % tuple(orb(x) for x in s)
+    return ("%02X%02X." * 3)[:-1] % tuple(x for x in s)
 
 
 def isis_nodeid2str(nodeid):
@@ -115,7 +90,7 @@ def isis_nodeid2str(nodeid):
 
 
 def isis_str2nodeid(s):
-    return "%s.%02X" % (isis_str2sysid(s[:-1]), orb(s[-1]))
+    return "%s.%02X" % (isis_str2sysid(s[:-1]), s[-1])
 
 
 def isis_lspid2str(lspid):
@@ -123,7 +98,7 @@ def isis_lspid2str(lspid):
 
 
 def isis_str2lspid(s):
-    return "%s-%02X" % (isis_str2nodeid(s[:-1]), orb(s[-1]))
+    return "%s-%02X" % (isis_str2nodeid(s[:-1]), s[-1])
 
 
 class _ISIS_IdFieldBase(Field):
@@ -250,7 +225,7 @@ class ISIS_CircuitTypeField(FlagsField):
 def _ISIS_GuessTlvClass_Helper(tlv_classes, defaultname, p, **kargs):
     cls = conf.raw_layer
     if len(p) >= 2:
-        tlvtype = orb(p[0])
+        tlvtype = p[0]
         clsname = tlv_classes.get(tlvtype, defaultname)
         cls = globals()[clsname]
 
@@ -375,7 +350,7 @@ class ISIS_UnreservedBandwidthSubTlv(ISIS_GenericSubTlv):
 class ISIS_TEDefaultMetricSubTlv(ISIS_GenericSubTlv):
     name = "TE Default Metric SubTLV"
     fields_desc = [ByteEnumField("type", 18, _isis_subtlv_names_1),
-                   FieldLenField("len", None, length_of="temetric", adjust=lambda pkt, x:x - 1, fmt="B"),  # noqa: E501
+                   FieldLenField("len", None, length_of="temetric", fmt="B"),
                    ThreeBytesField("temetric", 1000)]
 
 

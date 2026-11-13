@@ -4,14 +4,14 @@ Build your own tools
 
 You can use Scapy to make your own automated tools. You can also extend Scapy without having to edit its source file.
 
-If you have built some interesting tools, please contribute back to the github wiki !
+If you have built some interesting tools, please contribute back to the GitHub wiki!
 
     
 Using Scapy in your tools
 =========================
 You can easily use Scapy in your own tools. Just import what you need and do it.
 
-This first example takes an IP or a name as first parameter, send an ICMP echo request packet and display the completely dissected return packet::
+This first example takes an IP or a name as its first parameter, sends an ICMP echo request packet and displays the completely dissected return packet::
 
     #! /usr/bin/env python
     
@@ -36,7 +36,7 @@ change that using for instance::
 To disable almost all logs. (Scapy simply won't work properly if a CRITICAL
 failure occurs)
 
-.. note:: On interactive mode, the default log level is ``INFO``
+.. note:: In interactive mode, the default log level is ``INFO``
 
 More examples
 -------------
@@ -48,24 +48,24 @@ This is a more complex example which does an ARP ping and reports what it found 
     
     import sys
     if len(sys.argv) != 2:
-        print "Usage: arping2tex <net>\n  eg: arping2tex 192.168.1.0/24"
+        print("Usage: arping2tex <net>\n  eg: arping2tex 192.168.1.0/24")
         sys.exit(1)
     
-    from scapy.all import srp,Ether,ARP,conf
-    conf.verb=0
-    ans,unans=srp(Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(pdst=sys.argv[1]),
-                  timeout=2)
+    from scapy.all import srp, Ether, ARP, conf
+    conf.verb = 0
+    ans, unans = srp(Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=sys.argv[1]),
+                     timeout=2)
     
-    print r"\begin{tabular}{|l|l|}"
-    print r"\hline"
-    print r"MAC & IP\\"
-    print r"\hline"
+    print(r"\begin{tabular}{|l|l|}")
+    print(r"\hline")
+    print(r"MAC & IP\\")
+    print(r"\hline")
     for snd,rcv in ans:
-        print rcv.sprintf(r"%Ether.src% & %ARP.psrc%\\")
-    print r"\hline"
-    print r"\end{tabular}"
+        print(rcv.sprintf(r"%Ether.src% & %ARP.psrc%\\"))
+    print(r"\hline")
+    print(r"\end{tabular}")
 
-Here is another tool that will constantly monitor all interfaces on a machine and print all ARP request it sees, even on 802.11 frames from a Wi-Fi card in monitor mode. Note the store=0 parameter to sniff() to avoid storing all packets in memory for nothing::
+Here is another tool that will constantly monitor all interfaces on a machine and print all ARP requests it sees, even on 802.11 frames from a Wi-Fi card in monitor mode. Note the store=0 parameter to sniff() to avoid storing all packets in memory for nothing::
 
     #! /usr/bin/env python
     from scapy.all import *

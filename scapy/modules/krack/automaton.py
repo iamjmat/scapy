@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# This file is part of Scapy
+# See https://scapy.net/ for more information
+
 import hmac
 import hashlib
 from itertools import count
@@ -328,7 +332,7 @@ class KrackAP(Automaton):
         ])
 
     def send_wpa_enc(self, data, iv, seqnum, dest, mic_key,
-                     key_idx=0, additionnal_flag=["from-DS"],
+                     key_idx=0, additionnal_flag=["from_DS"],
                      encrypt_key=None):
         """Send an encrypted packet with content @data, using IV @iv,
         sequence number @seqnum, MIC key @mic_key
@@ -547,7 +551,7 @@ class KrackAP(Automaton):
             addr1=self.client,
             addr2=self.mac,
             addr3=self.mac,
-            FCfield='from-DS',
+            FCfield='from_DS',
             SC=(next(self.seq_num) << 4),
         )
         rep /= LLC(dsap=0xaa, ssap=0xaa, ctrl=3)
@@ -566,6 +570,7 @@ class KrackAP(Automaton):
         if RadioTap not in pkt:
             return
         if EAPOL in pkt and pkt.addr1 == pkt.addr3 == self.mac and \
+           pkt.addr2 == self.client and \
            pkt[EAPOL].load[1:2] == b"\x01":
             # Key MIC: set, Secure / Error / Request / Encrypted / SMK
             # message: not set
@@ -591,7 +596,7 @@ class KrackAP(Automaton):
             addr1=self.client,
             addr2=self.mac,
             addr3=self.mac,
-            FCfield='from-DS',
+            FCfield='from_DS',
             SC=(next(self.seq_num) << 4),
         )
 
@@ -648,7 +653,7 @@ class KrackAP(Automaton):
                 addr1=self.client,
                 addr2=self.mac,
                 addr3=self.mac,
-                FCfield='from-DS',
+                FCfield='from_DS',
                 SC=(next(self.seq_num) << 4),
                 subtype=0,
                 type="Data",
@@ -718,7 +723,7 @@ class KrackAP(Automaton):
             self.last_iv = iv
         else:
             if iv <= self.last_iv:
-                log_runtime.warning("IV re-use!! Client seems to be "
+                log_runtime.warning("IV reuse!! Client seems to be "
                                     "vulnerable to handshake 3/4 replay "
                                     "(CVE-2017-13077)"
                                     )

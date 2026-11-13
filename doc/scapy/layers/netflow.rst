@@ -1,13 +1,13 @@
 Netflow
 =======
 
-Netflow packets mainly comes in 3 versions::
+Netflow packets mainly come in 3 versions::
 
 - ``Netflow V5``
 - ``Netflow V7``
 - ``Netflow V9 / V10 (IPfix)``
 
-While the two first versions are pretty straightforward, building or dissecting Netflow v9/v10 isn't easy.
+While the first two versions are pretty straightforward, building or dissecting Netflow v9/v10 isn't easy.
 
 Netflow V1
 ----------
@@ -30,7 +30,7 @@ NetflowV9 / IPfix
 
 Netflow v9 and IPfix use a template based system. This means that records that are sent over the wire require a "Template" to be sent previously in a Flowset packet.
 
-This template is required to understand thr format of the record, therefore needs to be provided when building or dissecting those.
+This template is required to understand the format of the record, therefore needs to be provided when building or dissecting those.
 
 Fortunately, Scapy knows how to detect the templates and will provide dissecting methods that take care of that.
 
@@ -45,15 +45,17 @@ Fortunately, Scapy knows how to detect the templates and will provide dissecting
     header = Ether()/IP()/UDP()
     netflow_header = NetflowHeader()/NetflowHeaderV9()
 
-    # Let's first build the template. Those need an ID > 255
+    # Let's first build the template. Those need an ID > 255.
+    # The (full) list of possible fieldType is available in the
+    # NetflowV910TemplateFieldTypes list. You can also use the int value.
     flowset = NetflowFlowsetV9(
         templates=[NetflowTemplateV9(
             template_fields=[
-                NetflowTemplateFieldV9(fieldType=1, fieldLength=1),  # IN_BYTES
-                NetflowTemplateFieldV9(fieldType=2, fieldLength=4),  # IN_PKTS
-                NetflowTemplateFieldV9(fieldType=4),  # PROTOCOL
-                NetflowTemplateFieldV9(fieldType=8),  # IPV4_SRC_ADDR
-                NetflowTemplateFieldV9(fieldType=12),  # IPV4_DST_ADDR
+                NetflowTemplateFieldV9(fieldType="IN_BYTES", fieldLength=1),
+                NetflowTemplateFieldV9(fieldType="IN_PKTS", fieldLength=4),
+                NetflowTemplateFieldV9(fieldType="PROTOCOL"),
+                NetflowTemplateFieldV9(fieldType="IPV4_SRC_ADDR"),
+                NetflowTemplateFieldV9(fieldType="IPV4_DST_ADDR"),
             ],
             templateID=256,
             fieldCount=5)

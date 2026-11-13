@@ -1,22 +1,25 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # This file is part of Scapy
-# See http://www.secdev.org/projects/scapy for more information
+# See https://scapy.net/ for more information
 # Copyright (C) Philippe Biondi <phil@secdev.org>
-# This program is published under a GPLv2 license
-
 # Copyright (C) 2014 Maxence Tury <maxence.tury@ssi.gouv.fr>
-# OpenFlow is an open standard used in SDN deployments.
-# Based on OpenFlow v1.3.4
-# Specifications can be retrieved from https://www.opennetworking.org/
+
+"""
+OpenFlow v1.3.4
+
+OpenFlow is an open standard used in SDN deployments.
+Specifications can be retrieved from https://www.opennetworking.org/
+"""
+
 
 # scapy.contrib.description = OpenFlow v1.3
 # scapy.contrib.status = loads
 
-from __future__ import absolute_import
 import copy
 import struct
 
 
-from scapy.compat import orb, raw
+from scapy.compat import raw
 from scapy.config import conf
 from scapy.fields import BitEnumField, BitField, ByteEnumField, ByteField, \
     FieldLenField, FlagsField, IntEnumField, IntField, IPField, \
@@ -25,7 +28,6 @@ from scapy.fields import BitEnumField, BitField, ByteEnumField, ByteField, \
     XIntField, XShortField, PacketLenField
 from scapy.layers.l2 import Ether
 from scapy.packet import Packet, Padding, Raw
-import scapy.modules.six as six
 
 from scapy.contrib.openflow import _ofp_header, _ofp_header_item, \
     OFPacketField, OpenFlow, _UnknownOpenFlow
@@ -265,7 +267,7 @@ ofp_oxm_fields = {}
 
 
 def add_ofp_oxm_fields(i, org):
-    ofp_oxm_fields[i] = [ShortEnumField("class", "OFPXMC_OPENFLOW_BASIC", ofp_oxm_classes),  # noqa: E501
+    ofp_oxm_fields[i] = [ShortEnumField("class_", "OFPXMC_OPENFLOW_BASIC", ofp_oxm_classes),  # noqa: E501
                          BitEnumField("field", i // 2, 7, ofp_oxm_names),
                          BitField("hasmask", i % 2, 1)]
     ofp_oxm_fields[i].append(ByteField("len", org[2] + org[2] * (i % 2)))
@@ -577,7 +579,7 @@ class OXMPacketListField(PacketListField):
         return val
 
     def m2i(self, pkt, s):
-        t = orb(s[2])
+        t = s[2]
         nrm_t = t - t % 2
         if nrm_t not in self.index:
             self.index.append(nrm_t)
@@ -585,7 +587,7 @@ class OXMPacketListField(PacketListField):
 
     @staticmethod
     def _get_oxm_length(s):
-        return orb(s[3])
+        return s[3]
 
     def addfield(self, pkt, s, val):
         return s + b"".join(raw(x) for x in self.i2m(pkt, val))
@@ -621,7 +623,7 @@ class OXMID(Packet):
     @classmethod
     def dispatch_hook(cls, _pkt=None, *args, **kargs):
         if _pkt and len(_pkt) >= 2:
-            t = orb(_pkt[2])
+            t = _pkt[2]
             return ofp_oxm_id_cls.get(t, Raw)
         return Raw
 
@@ -672,7 +674,7 @@ class MatchField(PacketField):
             if Padding in r:
                 p = r[Padding]
                 i.payload = p
-                del(r.payload)
+                del r.payload
             return r.load, i
         else:
             return b"", i
@@ -690,20 +692,20 @@ class OpenFlow3(OpenFlow):
             # port 6653 has been allocated by IANA, port 6633 should no
             # longer be used
             # OpenFlow3 function may be called with None self in OFPPacketField
-            of_type = orb(_pkt[1])
+            of_type = _pkt[1]
             if of_type == 1:
-                err_type = orb(_pkt[9])
+                err_type = _pkt[9]
                 # err_type is a short int, but last byte is enough
                 if err_type == 255:
                     err_type = 65535
                 return ofp_error_cls[err_type]
             elif of_type == 18:
-                mp_type = orb(_pkt[9])
+                mp_type = _pkt[9]
                 if mp_type == 255:
                     mp_type = 65535
                 return ofp_multipart_request_cls[mp_type]
             elif of_type == 19:
-                mp_type = orb(_pkt[9])
+                mp_type = _pkt[9]
                 if mp_type == 255:
                     mp_type = 65535
                 return ofp_multipart_reply_cls[mp_type]
@@ -977,10 +979,8 @@ class OFPATSetField(OFPAT):
             zero_bytes = (8 - tmp_len % 8) % 8
             tmp_len = tmp_len + zero_bytes    # add padding length
             p = p[:2] + struct.pack("!H", tmp_len) + p[4:]
-        else:
-            zero_bytes = (8 - tmp_len % 8) % 8
-        # every message will be padded correctly
-        p += b"\x00" * zero_bytes
+            p += b"\x00" * zero_bytes
+        # message with user-defined length will not be automatically padded
         return p + pay
 
     def extract_padding(self, s):
@@ -2246,7 +2246,7 @@ class OFPFlowStats(_ofp_header_item):
                    LongField("byte_count", 0),
                    MatchField("match"),
                    PacketListField("instructions", [], OFPIT,
-                                   length_from=lambda pkt:pkt.len - 56 - pkt.match.len)]  # noqa: E501
+                                   length_from=lambda pkt:pkt.len - 52 - pkt.match.len)]  # noqa: E501
 
     def extract_padding(self, s):
         return b"", s
@@ -2513,7 +2513,7 @@ class OFPMPRequestGroupFeatures(_ofp_header):
                    XIntField("pad1", 0)]
 
 
-ofp_action_types_flags = [v for v in six.itervalues(ofp_action_types)
+ofp_action_types_flags = [v for v in ofp_action_types.values()
                           if v != 'OFPAT_EXPERIMENTER']
 
 
@@ -2695,9 +2695,9 @@ class OFPTFPT(Packet):
         if tmp_len is None:
             tmp_len = len(p) + len(pay)
             p = p[:2] + struct.pack("!H", tmp_len) + p[4:]
-        # every message will be padded correctly
-        zero_bytes = (8 - tmp_len % 8) % 8
-        p += b"\x00" * zero_bytes
+            zero_bytes = (8 - tmp_len % 8) % 8
+            p += b"\x00" * zero_bytes
+        # message with user-defined length will not be automatically padded
         return p + pay
 
     def extract_padding(self, s):

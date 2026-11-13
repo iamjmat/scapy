@@ -1,8 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # This file is part of Scapy
+# See https://scapy.net/ for more information
 # Copyright (C) 2007, 2008, 2009 Arnaud Ebalard
 #               2015, 2016, 2017 Maxence Tury
 #               2019 Romain Perez
-# This program is published under a GPLv2 license
 
 """
 TLS handshake fields & logic.
@@ -11,7 +12,6 @@ This module covers the handshake TLS subprotocol, except for the key exchange
 mechanisms which are addressed with keyexchange.py.
 """
 
-from __future__ import absolute_import
 import math
 import os
 import struct
@@ -24,6 +24,7 @@ from scapy.fields import (
     FieldLenField,
     IntField,
     PacketField,
+    PacketLenField,
     PacketListField,
     ShortEnumField,
     ShortField,
@@ -33,17 +34,17 @@ from scapy.fields import (
     UTCTimeField,
 )
 
-from scapy.compat import hex_bytes, orb, raw
-from scapy.config import conf
-from scapy.modules import six
+from scapy.compat import hex_bytes, raw
+from scapy.config import conf, crypto_validator
 from scapy.packet import Packet, Raw, Padding
 from scapy.utils import randstring, repr_hex
 from scapy.layers.x509 import OCSP_Response
-from scapy.layers.tls.cert import Cert
+from scapy.layers.tls.cert import Cert, CertList
 from scapy.layers.tls.basefields import (_tls_version, _TLSVersionField,
                                          _TLSClientVersionField)
 from scapy.layers.tls.extensions import (_ExtensionsLenField, _ExtensionsField,
                                          _cert_status_type,
+                                         TLS_Ext_PostHandshakeAuth,
                                          TLS_Ext_SupportedVersion_CH,
                                          TLS_Ext_SignatureAlgorithms,
                                          TLS_Ext_SupportedVersion_SH,
@@ -103,7 +104,7 @@ class _TLSHandshake(_GenericTLSSessionInheritance):
         tmp_len = len(p)
         if self.msglen is None:
             l2 = tmp_len - 4
-            p = struct.pack("!I", (orb(p[0]) << 24) | l2) + p[4:]
+            p = struct.pack("!I", (p[0] << 24) | l2) + p[4:]
         return p + pay
 
     def guess_payload_class(self, p):
@@ -113,9 +114,15 @@ class _TLSHandshake(_GenericTLSSessionInheritance):
         """
         Covers both post_build- and post_dissection- context updates.
         """
-
-        self.tls_session.handshake_messages.append(msg_str)
-        self.tls_session.handshake_messages_parsed.append(self)
+        # RFC8446 sect 4.4.1
+        # "Note, however, that subsequent post-handshake authentications do not
+        # include each other, just the messages through the end of the main
+        # handshake."
+        if self.tls_session.post_handshake:
+            self.tls_session.post_handshake_messages.append(msg_str)
+        else:
+            self.tls_session.handshake_messages.append(msg_str)
+            self.tls_session.handshake_messages_parsed.append(self)
 
 
 ###############################################################################
@@ -150,6 +157,9 @@ class _GMTUnixTimeField(UTCTimeField):
             return x
         return 0
 
+    def i2m(self, pkt, x):
+        return int(x) if x is not None else 0
+
 
 class _TLSRandomBytesField(StrFixedLenField):
     def i2repr(self, pkt, x):
@@ -175,13 +185,12 @@ class _CipherSuitesField(StrLenField):
         self.itemsize = struct.calcsize(itemfmt)
         i2s = self.i2s = {}
         s2i = self.s2i = {}
-        for k in six.iterkeys(dico):
+        for k in dico.keys():
             i2s[k] = dico[k]
             s2i[dico[k]] = k
 
     def any2i_one(self, pkt, x):
-        if (isinstance(x, _GenericCipherSuite) or
-                isinstance(x, _GenericCipherSuiteMetaclass)):
+        if isinstance(x, (_GenericCipherSuite, _GenericCipherSuiteMetaclass)):
             x = x.val
         if isinstance(x, bytes):
             x = self.s2i[x]
@@ -230,8 +239,7 @@ class _CipherSuitesField(StrLenField):
 class _CompressionMethodsField(_CipherSuitesField):
 
     def any2i_one(self, pkt, x):
-        if (isinstance(x, _GenericComp) or
-                isinstance(x, _GenericCompMetaclass)):
+        if isinstance(x, (_GenericComp, _GenericCompMetaclass)):
             x = x.val
         if isinstance(x, str):
             x = self.s2i[x]
@@ -335,9 +343,10 @@ class TLSClientHello(_TLSHandshake):
                             break
                     if s.sid:
                         s.middlebox_compatibility = True
-
                 if isinstance(e, TLS_Ext_SignatureAlgorithms):
                     s.advertised_sig_algs = e.sig_algs
+                if isinstance(e, TLS_Ext_PostHandshakeAuth):
+                    s.post_handshake_auth = True
 
 
 class TLS13ClientHello(_TLSHandshake):
@@ -386,7 +395,7 @@ class TLS13ClientHello(_TLSHandshake):
         tmp_len = len(p)
         if self.msglen is None:
             sz = tmp_len - 4
-            p = struct.pack("!I", (orb(p[0]) << 24) | sz) + p[4:]
+            p = struct.pack("!I", (p[0] << 24) | sz) + p[4:]
         s = self.tls_session
         if self.ext:
             for e in self.ext:
@@ -395,7 +404,7 @@ class TLS13ClientHello(_TLSHandshake):
                         # For a resumed PSK, the hash function use
                         # to compute the binder must be the same
                         # as the one used to establish the original
-                        # conntection. For that, we assume that
+                        # connection. For that, we assume that
                         # the ciphersuite associate with the ticket
                         # is given as argument to tlsSession
                         # (see layers/tls/automaton_cli.py for an
@@ -453,7 +462,7 @@ class TLS13ClientHello(_TLSHandshake):
             s.sid = self.sid
             s.middlebox_compatibility = True
 
-        self.random_bytes = msg_str[10:38]
+        self.random_bytes = msg_str[6:38]
         s.client_random = self.random_bytes
         if self.ext:
             for e in self.ext:
@@ -462,10 +471,12 @@ class TLS13ClientHello(_TLSHandshake):
                         # RFC 8701: GREASE of TLS will send unknown versions
                         # here. We have to ignore them
                         if ver in _tls_version:
-                            self.tls_session.advertised_tls_version = ver
+                            s.advertised_tls_version = ver
                             break
                 if isinstance(e, TLS_Ext_SignatureAlgorithms):
                     s.advertised_sig_algs = e.sig_algs
+                if isinstance(e, TLS_Ext_PostHandshakeAuth):
+                    s.post_handshake_auth = True
 
 
 ###############################################################################
@@ -515,6 +526,11 @@ class TLSServerHello(_TLSHandshake):
             if version == 0x0304 or version > 0x7f00:
                 return TLS13ServerHello
         return TLSServerHello
+
+    def build(self, *args, **kargs):
+        if self.getfieldval("sid") == b"" and self.tls_session:
+            self.sid = self.tls_session.sid
+        return super(TLSServerHello, self).build(*args, **kargs)
 
     def post_build(self, p, pay):
         if self.random_bytes is None:
@@ -664,7 +680,6 @@ class TLS13ServerHello(TLSServerHello):
             if not s.middlebox_compatibility:
                 s.triggered_pwcs_commit = True
         elif connection_end == "client":
-
             s.prcs = readConnState(ciphersuite=cs_cls,
                                    connection_end=connection_end,
                                    tls_version=s.tls_version)
@@ -697,12 +712,16 @@ class TLS13HelloRetryRequest(_TLSHandshake):
         fval = self.getfieldval("random_bytes")
         if fval is None:
             self.random_bytes = _tls_hello_retry_magic
+        if self.getfieldval("sid") == b"" and self.tls_session:
+            self.sid = self.tls_session.sid
         return _TLSHandshake.build(self)
 
+    @crypto_validator
     def tls_session_update(self, msg_str):
         s = self.tls_session
         s.tls13_retry = True
         s.tls13_client_pubshares = {}
+        # RFC8446 sect 4.4.1
         # If the server responds to a ClientHello with a HelloRetryRequest
         # The value of the first ClientHello is replaced by a message_hash
         if s.client_session_ticket:
@@ -799,7 +818,8 @@ class TLSEncryptedExtensions(_TLSHandshake):
                     s.wcs = self.tls_session.pwcs
                     s.triggered_pwcs_commit = False
                 else:
-                    s.triggered_prcs_commit = True
+                    s.triggered_pwcs_commit = True
+
 ###############################################################################
 #   Certificate                                                               #
 ###############################################################################
@@ -854,9 +874,9 @@ class _ASN1CertListField(StrLenField):
         if tmp_len is not None:
             m, ret = s[:tmp_len], s[tmp_len:]
         while m:
-            clen = struct.unpack("!I", b'\x00' + m[:3])[0]
-            lst.append((clen, Cert(m[3:3 + clen])))
-            m = m[3 + clen:]
+            c_len = struct.unpack("!I", b'\x00' + m[:3])[0]
+            lst.append((c_len, Cert(m[3:3 + c_len])))
+            m = m[3 + c_len:]
         return m + ret, lst
 
     def i2m(self, pkt, i):
@@ -899,9 +919,9 @@ class _ASN1CertField(StrLenField):
         m = s
         if tmp_len is not None:
             m, ret = s[:tmp_len], s[tmp_len:]
-        clen = struct.unpack("!I", b'\x00' + m[:3])[0]
-        len_cert = (clen, Cert(m[3:3 + clen]))
-        m = m[3 + clen:]
+        c_len = struct.unpack("!I", b'\x00' + m[:3])[0]
+        len_cert = (c_len, Cert(m[3:3 + c_len]))
+        m = m[3 + c_len:]
         return m + ret, len_cert
 
     def i2m(self, pkt, i):
@@ -949,9 +969,9 @@ class TLSCertificate(_TLSHandshake):
         self.tls_session_update(msg_str)
         connection_end = self.tls_session.connection_end
         if connection_end == "client":
-            self.tls_session.server_certs = [x[1] for x in self.certs]
+            self.tls_session.server_certs = CertList([x[1] for x in self.certs])
         else:
-            self.tls_session.client_certs = [x[1] for x in self.certs]
+            self.tls_session.client_certs = CertList([x[1] for x in self.certs])
 
 
 class _ASN1CertAndExt(_GenericTLSSessionInheritance):
@@ -987,11 +1007,11 @@ class TLS13Certificate(_TLSHandshake):
         connection_end = self.tls_session.connection_end
         if connection_end == "client":
             if self.certs:
-                sc = [x.cert[1] for x in self.certs]
+                sc = [x.cert[1] for x in self.certs if hasattr(x, 'cert')]
                 self.tls_session.server_certs = sc
         else:
             if self.certs:
-                cc = [x.cert[1] for x in self.certs]
+                cc = [x.cert[1] for x in self.certs if hasattr(x, 'cert')]
                 self.tls_session.client_certs = cc
 
 
@@ -1084,6 +1104,7 @@ class TLSServerKeyExchange(_TLSHandshake):
                 s.server_certs and len(s.server_certs) > 0):
             m = s.client_random + s.server_random + raw(self.params)
             sig_test = self.sig._verify_sig(m, s.server_certs[0])
+            s.server_kx_sig_valid = sig_test
             if not sig_test:
                 pkt_info = pkt.firstlayer().summary()
                 log_runtime.info("TLS: invalid ServerKeyExchange signature [%s]", pkt_info)  # noqa: E501
@@ -1178,6 +1199,11 @@ class TLS13CertificateRequest(_TLSHandshake):
                                     length_from=lambda pkt: pkt.msglen -
                                     pkt.cert_req_ctxt_len - 3)]
 
+    def tls_session_update(self, msg_str):
+        super(TLS13CertificateRequest, self).tls_session_update(msg_str)
+        self.tls_session.tls13_cert_req_ctxt = self.cert_req_ctxt
+
+
 ###############################################################################
 #   ServerHelloDone                                                           #
 ###############################################################################
@@ -1200,11 +1226,16 @@ class TLSCertificateVerify(_TLSHandshake):
                    _TLSSignatureField("sig", None,
                                       length_from=lambda pkt: pkt.msglen)]
 
+    # See https://datatracker.ietf.org/doc/html/rfc8446#section-4.4 for how to compute
+    # the signature.
+
     def build(self, *args, **kargs):
         sig = self.getfieldval("sig")
         if sig is None:
             s = self.tls_session
             m = b"".join(s.handshake_messages)
+            if s.post_handshake:
+                m += b"".join(s.post_handshake_messages)
             tls_version = s.tls_version
             if tls_version is None:
                 tls_version = s.advertised_tls_version
@@ -1225,6 +1256,8 @@ class TLSCertificateVerify(_TLSHandshake):
     def post_dissection(self, pkt):
         s = self.tls_session
         m = b"".join(s.handshake_messages)
+        if s.post_handshake:
+            m += b"".join(s.post_handshake_messages)
         tls_version = s.tls_version
         if tls_version is None:
             tls_version = s.advertised_tls_version
@@ -1238,6 +1271,7 @@ class TLSCertificateVerify(_TLSHandshake):
         if s.connection_end == "server":
             if s.client_certs and len(s.client_certs) > 0:
                 sig_test = self.sig._verify_sig(m, s.client_certs[0])
+                s.client_cert_verify_valid = sig_test
                 if not sig_test:
                     pkt_info = pkt.firstlayer().summary()
                     log_runtime.info("TLS: invalid CertificateVerify signature [%s]", pkt_info)  # noqa: E501
@@ -1245,6 +1279,7 @@ class TLSCertificateVerify(_TLSHandshake):
             # should be TLS 1.3 only
             if s.server_certs and len(s.server_certs) > 0:
                 sig_test = self.sig._verify_sig(m, s.server_certs[0])
+                s.server_cert_verify_valid = sig_test
                 if not sig_test:
                     pkt_info = pkt.firstlayer().summary()
                     log_runtime.info("TLS: invalid CertificateVerify signature [%s]", pkt_info)  # noqa: E501
@@ -1258,9 +1293,9 @@ class _TLSCKExchKeysField(PacketField):
     __slots__ = ["length_from"]
     holds_packet = 1
 
-    def __init__(self, name, length_from=None, remain=0):
+    def __init__(self, name, length_from=None):
         self.length_from = length_from
-        PacketField.__init__(self, name, None, None, remain=remain)
+        PacketField.__init__(self, name, None, None)
 
     def m2i(self, pkt, m):
         """
@@ -1328,7 +1363,14 @@ class TLSClientKeyExchange(_TLSHandshake):
                 self.tls_session.session_hash = (
                     Hash_MD5().digest(to_hash) + Hash_SHA().digest(to_hash)
                 )
-            self.tls_session.compute_ms_and_derive_keys()
+            if self.tls_session.pre_master_secret:
+                self.tls_session.compute_ms_and_derive_keys()
+
+        if not self.tls_session.master_secret:
+            # There are still no master secret (we're just passive)
+            if self.tls_session.use_nss_master_secret_if_present():
+                # we have a NSS file
+                self.tls_session.compute_ms_and_derive_keys()
 
 
 ###############################################################################
@@ -1339,7 +1381,7 @@ class _VerifyDataField(StrLenField):
     def getfield(self, pkt, s):
         if pkt.tls_session.tls_version == 0x0300:
             sep = 36
-        elif pkt.tls_session.tls_version >= 0x0304:
+        elif pkt.tls_session.tls_version and pkt.tls_session.tls_version >= 0x0304:
             sep = pkt.tls_session.rcs.hash.hash_len
         else:
             sep = 12
@@ -1357,6 +1399,8 @@ class TLSFinished(_TLSHandshake):
         if fval is None:
             s = self.tls_session
             handshake_msg = b"".join(s.handshake_messages)
+            if s.post_handshake:
+                handshake_msg += b"".join(s.post_handshake_messages)
             con_end = s.connection_end
             tls_version = s.tls_version
             if tls_version is None:
@@ -1366,13 +1410,16 @@ class TLSFinished(_TLSHandshake):
                 self.vdata = s.wcs.prf.compute_verify_data(con_end, "write",
                                                            handshake_msg, ms)
             else:
-                self.vdata = s.compute_tls13_verify_data(con_end, "write")
+                self.vdata = s.compute_tls13_verify_data(con_end, "write",
+                                                         handshake_msg)
         return _TLSHandshake.build(self, *args, **kargs)
 
     def post_dissection(self, pkt):
         s = self.tls_session
         if not s.frozen:
             handshake_msg = b"".join(s.handshake_messages)
+            if s.post_handshake:
+                handshake_msg += b"".join(s.post_handshake_messages)
             tls_version = s.tls_version
             if tls_version is None:
                 tls_version = s.advertised_tls_version
@@ -1381,13 +1428,16 @@ class TLSFinished(_TLSHandshake):
                 con_end = s.connection_end
                 verify_data = s.rcs.prf.compute_verify_data(con_end, "read",
                                                             handshake_msg, ms)
-                if self.vdata != verify_data:
+                s.finished_valid = self.vdata == verify_data
+                if not s.finished_valid:
                     pkt_info = pkt.firstlayer().summary()
                     log_runtime.info("TLS: invalid Finished received [%s]", pkt_info)  # noqa: E501
             elif tls_version >= 0x0304:
                 con_end = s.connection_end
-                verify_data = s.compute_tls13_verify_data(con_end, "read")
-                if self.vdata != verify_data:
+                verify_data = s.compute_tls13_verify_data(con_end, "read",
+                                                          handshake_msg)
+                s.finished_valid = self.vdata == verify_data
+                if not s.finished_valid:
                     pkt_info = pkt.firstlayer().summary()
                     log_runtime.info("TLS: invalid Finished received [%s]", pkt_info)  # noqa: E501
 
@@ -1397,7 +1447,7 @@ class TLSFinished(_TLSHandshake):
         tls_version = s.tls_version
         if tls_version is None:
             tls_version = s.advertised_tls_version
-        if tls_version >= 0x0304:
+        if tls_version >= 0x0304 and not s.post_handshake:
             s.pwcs = writeConnState(ciphersuite=type(s.wcs.ciphersuite),
                                     connection_end=s.connection_end,
                                     tls_version=s.tls_version)
@@ -1407,6 +1457,9 @@ class TLSFinished(_TLSHandshake):
             elif s.connection_end == "client":
                 s.compute_tls13_traffic_secrets_end()
                 s.compute_tls13_resumption_secret()
+        if s.connection_end == "client":
+            s.post_handshake = True
+            s.post_handshake_messages = []
 
     def post_dissection_tls_session_update(self, msg_str):
         self.tls_session_update(msg_str)
@@ -1414,7 +1467,7 @@ class TLSFinished(_TLSHandshake):
         tls_version = s.tls_version
         if tls_version is None:
             tls_version = s.advertised_tls_version
-        if tls_version >= 0x0304:
+        if tls_version >= 0x0304 and not s.post_handshake:
             s.prcs = readConnState(ciphersuite=type(s.rcs.ciphersuite),
                                    connection_end=s.connection_end,
                                    tls_version=s.tls_version)
@@ -1424,6 +1477,9 @@ class TLSFinished(_TLSHandshake):
             elif s.connection_end == "server":
                 s.compute_tls13_traffic_secrets_end()
                 s.compute_tls13_resumption_secret()
+        if s.connection_end == "server":
+            s.post_handshake = True
+            s.post_handshake_messages = []
 
 
 # Additional handshake messages
@@ -1505,7 +1561,7 @@ class ThreeBytesLenField(FieldLenField):
 _cert_status_cls = {1: OCSP_Response}
 
 
-class _StatusField(PacketField):
+class _StatusField(PacketLenField):
     def m2i(self, pkt, m):
         idtype = pkt.status_type
         cls = self.cls
@@ -1521,7 +1577,8 @@ class TLSCertificateStatus(_TLSHandshake):
                    ByteEnumField("status_type", 1, _cert_status_type),
                    ThreeBytesLenField("responselen", None,
                                       length_of="response"),
-                   _StatusField("response", None, Raw)]
+                   _StatusField("response", None, Raw,
+                                length_from=lambda pkt: pkt.responselen)]
 
 
 ###############################################################################
@@ -1650,7 +1707,6 @@ class TLS13NewSessionTicket(_TLSHandshake):
         return _TLSHandshake.build(self)
 
     def post_dissection_tls_session_update(self, msg_str):
-        self.tls_session_update(msg_str)
         if self.tls_session.connection_end == "client":
             self.tls_session.client_session_ticket = self.ticket
 
@@ -1688,6 +1744,8 @@ class TLS13KeyUpdate(_TLSHandshake):
 
     def post_dissection_tls_session_update(self, msg_str):
         s = self.tls_session
+        if s.tls_version != 0x0304 or not s.post_handshake:
+            return
         s.prcs = writeConnState(ciphersuite=type(s.rcs.ciphersuite),
                                 connection_end=s.connection_end,
                                 tls_version=s.tls_version)

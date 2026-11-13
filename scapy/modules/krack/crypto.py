@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# This file is part of Scapy
+# See https://scapy.net/ for more information
+
 import hashlib
 import hmac
 from struct import unpack, pack
@@ -6,9 +10,7 @@ from zlib import crc32
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms
 from cryptography.hazmat.backends import default_backend
 
-import scapy.modules.six as six
-from scapy.modules.six.moves import range
-from scapy.compat import orb, chb
+from scapy.compat import chb
 from scapy.layers.dot11 import Dot11TKIP
 from scapy.utils import mac2str
 
@@ -155,7 +157,7 @@ def gen_TKIP_RC4_key(TSC, TA, TK):
     assert len(TSC) == 6
     assert len(TA) == 6
     assert len(TK) == 16
-    assert all(isinstance(x, six.integer_types) for x in TSC + TA + TK)
+    assert all(isinstance(x, int) for x in TSC + TA + TK)
 
     # Phase 1
     # 802.11i p.54
@@ -289,7 +291,7 @@ def parse_TKIP_hdr(pkt):
     # 802.11i p. 46
     assert (TSC1 | 0x20) & 0x7f == WEPseed
 
-    TA = [orb(e) for e in mac2str(pkt.addr2)]
+    TA = [e for e in mac2str(pkt.addr2)]
     TSC = [TSC0, TSC1, TSC2, TSC3, TSC4, TSC5]
 
     return TSC, TA, payload
@@ -311,9 +313,9 @@ def build_TKIP_payload(data, iv, mac, tk):
     TKIP_hdr = chb(TSC1) + chb((TSC1 | 0x20) & 0x7f) + chb(TSC0) + chb(bitfield)  # noqa: E501
     TKIP_hdr += chb(TSC2) + chb(TSC3) + chb(TSC4) + chb(TSC5)
 
-    TA = [orb(e) for e in mac2str(mac)]
+    TA = [e for e in mac2str(mac)]
     TSC = [TSC0, TSC1, TSC2, TSC3, TSC4, TSC5]
-    TK = [orb(x) for x in tk]
+    TK = [x for x in tk]
 
     rc4_key = gen_TKIP_RC4_key(TSC, TA, TK)
     return TKIP_hdr + ARC4_encrypt(rc4_key, data)
@@ -322,7 +324,7 @@ def build_TKIP_payload(data, iv, mac, tk):
 def parse_data_pkt(pkt, tk):
     """Extract data from a WPA packet @pkt with temporal key @tk"""
     TSC, TA, data = parse_TKIP_hdr(pkt)
-    TK = [orb(x) for x in tk]
+    TK = [x for x in tk]
 
     rc4_key = gen_TKIP_RC4_key(TSC, TA, TK)
     return ARC4_decrypt(rc4_key, data)

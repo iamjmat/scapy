@@ -1,25 +1,39 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # This file is part of Scapy
-# See http://www.secdev.org/projects/scapy for more information
+# See https://scapy.net/ for more information
 # Copyright (C) Philippe Biondi <phil@secdev.org>
-# This program is published under a GPLv2 license
 
 """
 Global variables and functions for handling external data sets.
+
+This module lazily loads the following files or their platform equivalents:
+
+- /etc/protocols: IP protocol names (IP_PROTOS).
+- /etc/services: TCP, UDP, and SCTP service names (TCP_SERVICES,
+  UDP_SERVICES, and SCTP_SERVICES).
+- /etc/ethertypes: Ethernet protocol names (ETHER_TYPES).
+- Wireshark's share/wireshark/manuf: MAC manufacturers (MANUFDB).
+
+EtherTypes and manufacturers fall back to copies bundled with Scapy.
+Bluetooth company identifiers (BLUETOOTH_CORE_COMPANY_IDENTIFIERS) are also
+loaded lazily from bundled data. EtherTypes, services, manufacturers, and
+Bluetooth identifiers use an on-disk pickle cache when available.
 """
 
 import calendar
+import hashlib
 import os
-import re
+import pickle
 import warnings
 
+from functools import lru_cache, wraps
 
-from scapy.dadict import DADict, fixname
 from scapy.consts import FREEBSD, NETBSD, OPENBSD, WINDOWS
+from scapy.dadict import DADict, fixname
 from scapy.error import log_loading
-from scapy.compat import plain_str
-import scapy.modules.six as six
 
-from scapy.compat import (
+# Typing imports
+from typing import (
     Any,
     Callable,
     Dict,
@@ -27,8 +41,10 @@ from scapy.compat import (
     List,
     Optional,
     Tuple,
+    Union,
     cast,
 )
+from scapy.compat import DecoratorCallable
 
 
 ############
@@ -118,16 +134,23 @@ DLT_AX25_KISS = 202
 DLT_PPP_WITH_DIR = 204
 DLT_FC_2 = 224
 DLT_CAN_SOCKETCAN = 227
-DLT_IPV4 = 228
-DLT_IPV6 = 229
+if OPENBSD:
+    DLT_IPV4 = DLT_RAW
+    DLT_IPV6 = DLT_RAW
+else:
+    DLT_IPV4 = 228
+    DLT_IPV6 = 229
 DLT_IEEE802_15_4_NOFCS = 230
 DLT_USBPCAP = 249
 DLT_NETLINK = 253
 DLT_USB_DARWIN = 266
 DLT_BLUETOOTH_LE_LL = 251
+DLT_BLUETOOTH_LINUX_MONITOR = 254
 DLT_BLUETOOTH_LE_LL_WITH_PHDR = 256
 DLT_VSOCK = 271
+DLT_NORDIC_BLE = 272
 DLT_ETHERNET_MPACKET = 274
+DLT_LINUX_SLL2 = 276
 
 # From net/ipv6.h on Linux (+ Additions)
 IPV6_ADDR_UNICAST = 0x01
@@ -194,7 +217,7 @@ ARPHRD_TO_DLT = {  # netlink -> datalink
     ARPHRD_CHAOS: DLT_CHAOS,
     ARPHRD_CAN: DLT_LINUX_SLL,
     ARPHRD_IEEE802_TR: DLT_IEEE802,
-    ARPHRD_IEEE802: DLT_IEEE802,
+    ARPHRD_IEEE802: DLT_EN10MB,
     ARPHRD_ARCNET: DLT_ARCNET_LINUX,
     ARPHRD_FDDI: DLT_FDDI,
     ARPHRD_ATM: -1,
@@ -284,24 +307,87 @@ IANA_ENTERPRISE_NUMBERS = {
 }
 
 
-def load_protocols(filename, _fallback=None, _integer_base=10,
+def scapy_data_cache(name):
+    # type: (str) -> Callable[[DecoratorCallable], DecoratorCallable]
+    """
+    This decorator caches the loading of 'data' dictionaries, in order to reduce
+    loading times.
+    """
+    from scapy.main import SCAPY_CACHE_FOLDER
+    if SCAPY_CACHE_FOLDER is None:
+        # Cannot cache.
+        return lambda x: x
+    cachepath = SCAPY_CACHE_FOLDER / (name + ".pickle")
+
+    def _cached_loader(func, name=name):
+        # type: (DecoratorCallable, str) -> DecoratorCallable
+        """Wrap a data loader with the named disk cache."""
+        @wraps(func)
+        def load(filename=None):
+            # type: (Optional[str]) -> Any
+            """Load data from the cache or the original loader."""
+            cache_id = hashlib.sha256((filename or "").encode()).hexdigest()
+            if cachepath.exists():
+                try:
+                    with cachepath.open("rb") as fd:
+                        data = _CacheUnpickler(fd).load()
+                    if data["id"] == cache_id:
+                        return data["content"]
+                except Exception as ex:
+                    log_loading.info(
+                        "Couldn't load cache from %s: %s" % (
+                            str(cachepath),
+                            str(ex),
+                        )
+                    )
+                    cachepath.unlink(missing_ok=True)
+            # Cache does not exist or is invalid.
+            content = func(filename)
+            data = {
+                "content": content,
+                "id": cache_id,
+            }
+            try:
+                cachepath.parent.mkdir(parents=True, exist_ok=True)
+                with cachepath.open("wb") as fd:
+                    pickle.dump(data, fd)
+                return content
+            except Exception as ex:
+                log_loading.info(
+                    "Couldn't write cache into %s: %s" % (
+                        str(cachepath),
+                        str(ex)
+                    )
+                )
+                return content
+        return load  # type: ignore
+    return _cached_loader
+
+
+def load_protocols(filename=None, _fallback=None, _integer_base=10,
                    _cls=DADict[int, str]):
-    # type: (str, Optional[bytes], int, type) -> DADict[int, str]
-    """"Parse /etc/protocols and return values as a dictionary."""
-    spaces = re.compile(b"[ \t]+|\n")
+    # type: (Optional[str], Optional[Callable[[], Iterator[str]]], int, type) -> DADict[int, str]  # noqa: E501
+    """Parse /etc/protocols and return values as a dictionary."""
+    if filename is None:
+        if WINDOWS:
+            filename = os.path.join(
+                os.environ["SystemRoot"], "system32", "drivers", "etc", "protocol"
+            )
+        else:
+            filename = "/etc/protocols"
     dct = _cls(_name=filename)  # type: DADict[int, str]
 
     def _process_data(fdesc):
-        # type: (Iterator[bytes]) -> None
+        # type: (Iterator[str]) -> None
         for line in fdesc:
             try:
-                shrp = line.find(b"#")
+                shrp = line.find("#")
                 if shrp >= 0:
                     line = line[:shrp]
                 line = line.strip()
                 if not line:
                     continue
-                lt = tuple(re.split(spaces, line))
+                lt = tuple(line.split())
                 if len(lt) < 2 or not lt[0]:
                     continue
                 dct[int(lt[1], _integer_base)] = fixname(lt[0])
@@ -315,11 +401,11 @@ def load_protocols(filename, _fallback=None, _integer_base=10,
     try:
         if not filename:
             raise IOError
-        with open(filename, "rb") as fdesc:
+        with open(filename, "r", errors="backslashreplace") as fdesc:
             _process_data(fdesc)
     except IOError:
         if _fallback:
-            _process_data(iter(_fallback.split(b"\n")))
+            _process_data(_fallback())
         else:
             log_loading.info("Can't open %s file", filename)
     return dct
@@ -349,23 +435,40 @@ class EtherDA(DADict[int, str]):
         return super(EtherDA, self).__getitem__(attr)
 
 
-def load_ethertypes(filename):
+@scapy_data_cache("ethertypes")
+def load_ethertypes(filename=None):
     # type: (Optional[str]) -> EtherDA
-    """"Parse /etc/ethertypes and return values as a dictionary.
-    If unavailable, use the copy bundled with Scapy."""
-    from scapy.libs.ethertypes import DATA
-    prot = load_protocols(filename or "Scapy's backup ETHER_TYPES",
-                          _fallback=DATA,
+    """Load EtherTypes from a file or the copy bundled with Scapy."""
+    def _fallback() -> Iterator[str]:
+        # Fallback. Lazy loaded as the file is big.
+        from scapy.libs.ethertypes import DATA
+        return iter(DATA.split("\n"))
+    prot = load_protocols(filename or "scapy/ethertypes",
+                          _fallback=_fallback,
                           _integer_base=16,
                           _cls=EtherDA)
     return cast(EtherDA, prot)
 
 
-def load_services(filename):
-    # type: (str) -> Tuple[DADict[int, str], DADict[int, str]]
-    spaces = re.compile(b"[ \t]+|\n")
+@scapy_data_cache("services")
+def load_services(filename=None):
+    # type: (Optional[str]) -> Tuple[DADict[int, str], DADict[int, str], DADict[int, str]]  # noqa: E501
+    """Parse /etc/services and return TCP, UDP, and SCTP dictionaries."""
+    if filename is None:
+        if WINDOWS:
+            filename = os.path.join(
+                os.environ["SystemRoot"], "system32", "drivers", "etc", "services"
+            )
+        else:
+            filename = "/etc/services"
     tdct = DADict(_name="%s-tcp" % filename)  # type: DADict[int, str]
     udct = DADict(_name="%s-udp" % filename)  # type: DADict[int, str]
+    sdct = DADict(_name="%s-sctp" % filename)  # type: DADict[int, str]
+    dcts = {
+        b"tcp": tdct,
+        b"udp": udct,
+        b"sctp": sdct,
+    }
     try:
         with open(filename, "rb") as fdesc:
             for line in fdesc:
@@ -376,17 +479,16 @@ def load_services(filename):
                     line = line.strip()
                     if not line:
                         continue
-                    lt = tuple(re.split(spaces, line))
+                    lt = tuple(line.split())
                     if len(lt) < 2 or not lt[0]:
                         continue
-                    dtct = None
-                    if lt[1].endswith(b"/tcp"):
-                        dtct = tdct
-                    elif lt[1].endswith(b"/udp"):
-                        dtct = udct
-                    else:
+                    if b"/" not in lt[1]:
                         continue
-                    port = lt[1].split(b'/')[0]
+                    port, proto = lt[1].split(b"/", 1)
+                    try:
+                        dtct = dcts[proto]
+                    except KeyError:
+                        continue
                     name = fixname(lt[0])
                     if b"-" in port:
                         sport, eport = port.split(b"-")
@@ -403,7 +505,7 @@ def load_services(filename):
                     )
     except IOError:
         log_loading.info("Can't open /etc/services file")
-    return tdct, udct
+    return tdct, udct, sdct
 
 
 class ManufDA(DADict[str, Tuple[str, str]]):
@@ -450,8 +552,7 @@ class ManufDA(DADict[str, Tuple[str, str]]):
         else:
             name = name.lower()
             filtr = lambda x, l: any(x in z.lower() for z in l)
-        return {k: v for k, v in six.iteritems(self.d)
-                if filtr(name, v)}
+        return {k: v for k, v in self.d.items() if filtr(name, v)}  # type: ignore
 
     def __dir__(self):
         # type: () -> List[str]
@@ -464,31 +565,73 @@ class ManufDA(DADict[str, Tuple[str, str]]):
         ] + super(ManufDA, self).__dir__()
 
 
-def load_manuf(filename):
-    # type: (str) -> ManufDA
-    """
-    Loads manuf file from Wireshark.
+class _CacheUnpickler(pickle.Unpickler):
+    """Unpickle cache data without loading classes outside its data types."""
 
-    :param filename: the file to load the manuf file from
-    :returns: a ManufDA filled object
-    """
-    manufdb = ManufDA(_name=filename)
-    with open(filename, "rb") as fdesc:
+    _ALLOWED = {
+        ("scapy.dadict", "DADict"): DADict,
+        ("scapy.data", "EtherDA"): EtherDA,
+        ("scapy.data", "ManufDA"): ManufDA,
+    }
+
+    def find_class(self, module, name):
+        # type: (str, str) -> Any
+        try:
+            return self._ALLOWED[(module, name)]
+        except KeyError as exc:
+            raise pickle.UnpicklingError(
+                "Forbidden class in cache: %s.%s" % (module, name)
+            ) from exc
+
+
+@scapy_data_cache("manufdb")
+def load_manuf(filename=None):
+    # type: (Optional[str]) -> ManufDA
+    """Load Wireshark manufacturer names and return values as a dictionary."""
+    if filename is None and not WINDOWS:
+        filename = select_path(
+            ['/usr', '/usr/local', '/opt', '/opt/wireshark',
+             '/Applications/Wireshark.app/Contents/Resources'],
+            "share/wireshark/manuf"
+        )
+    manufdb = ManufDA(_name=filename or "scapy/manufdb")
+
+    def _process_data(fdesc):
+        # type: (Iterator[str]) -> None
         for line in fdesc:
             try:
                 line = line.strip()
-                if not line or line.startswith(b"#"):
+                if not line or line.startswith("#"):
                     continue
                 parts = line.split(None, 2)
-                ouib, shrt = parts[:2]
-                lng = parts[2].lstrip(b"#").strip() if len(parts) > 2 else b""
+                oui, shrt = parts[:2]
+                lng = parts[2].lstrip("#").strip() if len(parts) > 2 else ""
                 lng = lng or shrt
-                oui = plain_str(ouib)
-                manufdb[oui] = plain_str(shrt), plain_str(lng)
+                manufdb[oui] = shrt, lng
             except Exception:
                 log_loading.warning("Couldn't parse one line from [%s] [%r]",
                                     filename, line, exc_info=True)
+
+    try:
+        if not filename:
+            raise IOError
+        with open(filename, "r", errors="backslashreplace") as fdesc:
+            _process_data(fdesc)
+    except IOError:
+        # Fallback. Lazy loaded as the file is big.
+        from scapy.libs.manuf import DATA
+        _process_data(iter(DATA.split("\n")))
     return manufdb
+
+
+@scapy_data_cache("bluetoothids")
+def load_bluetoothids(filename=None):
+    # type: (Optional[str]) -> DADict[int, str]
+    """Load Bluetooth company IDs and return values as a dictionary."""
+    from scapy.libs.bluetoothids import DATA
+    identifiers = DADict(_name="scapy/bluetoothids")  # type: DADict[int, str]
+    identifiers.update(cast(Dict[int, str], DATA))
+    return identifiers
 
 
 def select_path(directories, filename):
@@ -501,38 +644,54 @@ def select_path(directories, filename):
     return None
 
 
-if WINDOWS:
-    IP_PROTOS = load_protocols(os.environ["SystemRoot"] + "\\system32\\drivers\\etc\\protocol")  # noqa: E501
-    TCP_SERVICES, UDP_SERVICES = load_services(os.environ["SystemRoot"] + "\\system32\\drivers\\etc\\services")  # noqa: E501
-    # Default values, will be updated by arch.windows
-    ETHER_TYPES = load_ethertypes(None)
-    MANUFDB = ManufDA()
-else:
-    IP_PROTOS = load_protocols("/etc/protocols")
-    ETHER_TYPES = load_ethertypes("/etc/ethertypes")
-    TCP_SERVICES, UDP_SERVICES = load_services("/etc/services")
-    MANUFDB = ManufDA()
-    manuf_path = select_path(
-        ['/usr', '/usr/local', '/opt', '/opt/wireshark',
-         '/Applications/Wireshark.app/Contents/Resources'],
-        "share/wireshark/manuf"
-    )
-    if manuf_path:
-        try:
-            MANUFDB = load_manuf(manuf_path)
-        except (IOError, OSError):
-            log_loading.warning("Cannot read wireshark manuf database")
+@lru_cache(maxsize=1)
+def _load_services():
+    # type: () -> Tuple[DADict[int, str], DADict[int, str], DADict[int, str]]
+    """Share one services load across the TCP, UDP, and SCTP dictionaries."""
+    return load_services()
+
+
+IP_PROTOS: DADict[int, str] = DADict(
+    lazy_load=load_protocols,
+    _name="IP_PROTOS_UNLOADED",
+)
+TCP_SERVICES: DADict[int, str] = DADict(
+    lazy_load=lambda: _load_services()[0],
+    _name="TCP_SERVICES_UNLOADED",
+)
+UDP_SERVICES: DADict[int, str] = DADict(
+    lazy_load=lambda: _load_services()[1],
+    _name="UDP_SERVICES_UNLOADED",
+)
+SCTP_SERVICES: DADict[int, str] = DADict(
+    lazy_load=lambda: _load_services()[2],
+    _name="SCTP_SERVICES_UNLOADED",
+)
+ETHER_TYPES = EtherDA(
+    lazy_load=lambda: load_ethertypes(None if WINDOWS else "/etc/ethertypes"),
+    _name="ETHER_TYPES_UNLOADED",
+)
+MANUFDB = ManufDA(
+    lazy_load=load_manuf,
+    _name="MANUFDB_UNLOADED",
+)
+BLUETOOTH_CORE_COMPANY_IDENTIFIERS: DADict[int, str] = DADict(
+    lazy_load=load_bluetoothids,
+    _name="BLUETOOTH_CORE_COMPANY_IDENTIFIERS_UNLOADED",
+)
 
 
 #####################
 #  knowledge bases  #
 #####################
+KBBaseType = Optional[Union[str, List[Tuple[str, Dict[str, Dict[str, str]]]]]]
 
-class KnowledgeBase:
+
+class KnowledgeBase(object):
     def __init__(self, filename):
         # type: (Optional[Any]) -> None
         self.filename = filename
-        self.base = None  # type: Optional[str]
+        self.base = None  # type: KBBaseType
 
     def lazy_init(self):
         # type: () -> None
@@ -549,7 +708,7 @@ class KnowledgeBase:
             self.base = oldbase
 
     def get_base(self):
-        # type: () -> str
+        # type: () -> Union[str, List[Tuple[str, Dict[str,Dict[str,str]]]]]
         if self.base is None:
             self.lazy_init()
-        return cast(str, self.base)
+        return cast(Union[str, List[Tuple[str, Dict[str, Dict[str, str]]]]], self.base)

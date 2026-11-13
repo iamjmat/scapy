@@ -1,23 +1,14 @@
-#############################################################################
-#                                                                           #
-#  http2.py --- HTTP/2 support for Scapy                                    #
-#               see RFC7540 and RFC7541                                     #
-#               for more information                                        #
-#                                                                           #
-#  Copyright (C) 2016  Florian Maury <florian.maury@ssi.gouv.fr>            #
-#                                                                           #
-#  This file is part of Scapy                                               #
-#  Scapy is free software: you can redistribute it and/or modify it         #
-#  under the terms of the GNU General Public License version 2 as           #
-#  published by the Free Software Foundation.                               #
-#                                                                           #
-#  This program is distributed in the hope that it will be useful, but      #
-#  WITHOUT ANY WARRANTY; without even the implied warranty of               #
-#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU        #
-#  General Public License for more details.                                 #
-#                                                                           #
-#############################################################################
-"""http2 Module
+# SPDX-License-Identifier: GPL-2.0-only
+# This file is part of Scapy
+# See https://scapy.net/ for more information
+# Copyright (C) 2016  Florian Maury <florian.maury@ssi.gouv.fr>
+
+"""
+http2
+
+HTTP/2 support for Scapy
+see RFC7540 and RFC7541 for more information
+
 Implements packets and fields required to encode/decode HTTP/2 Frames
 and HPack encoded headers
 """
@@ -27,20 +18,25 @@ and HPack encoded headers
 
 # base_classes triggers an unwanted import warning
 
-from __future__ import absolute_import
-from __future__ import print_function
 import abc
 import re
 from io import BytesIO
 import struct
-import scapy.modules.six as six
-from scapy.compat import raw, plain_str, hex_bytes, orb, chb, bytes_encode
+from scapy.compat import plain_str, chb, bytes_encode
 
 # Only required if using mypy-lang for static typing
 # Most symbols are used in mypy-interpreted "comments".
 # Sized must be one of the superclasses of a class implementing __len__
-from scapy.compat import Optional, List, Union, Callable, Any, \
-    Tuple, Sized, Pattern  # noqa: F401
+from typing import (
+    Optional,
+    List,
+    Union,
+    Callable,
+    Any,
+    Tuple,
+    Sized,
+    Pattern,
+)
 from scapy.base_classes import Packet_metaclass  # noqa: F401
 
 import scapy.fields as fields
@@ -72,9 +68,9 @@ class HPackMagicBitField(fields.BitField):
         :return: None
         :raises: AssertionError
         """
-        assert(default >= 0)
+        assert default >= 0
         # size can be negative if encoding is little-endian (see rev property of bitfields)  # noqa: E501
-        assert(size != 0)
+        assert size != 0
         self._magic = default
         super(HPackMagicBitField, self).__init__(name, default, size)
 
@@ -105,7 +101,7 @@ class HPackMagicBitField(fields.BitField):
         assert (
             isinstance(r, tuple) and
             len(r) == 2 and
-            isinstance(r[1], six.integer_types)
+            isinstance(r[1], int)
         ), 'Second element of BitField.getfield return value expected to be an int or a long; API change detected'  # noqa: E501
         assert r[1] == self._magic, 'Invalid value parsed from s; error in class guessing detected!'  # noqa: E501
         return r
@@ -197,14 +193,14 @@ class AbstractUVarIntField(fields.Field):
         :return: None
         :raises: AssertionError
         """
-        assert(default is None or (isinstance(default, six.integer_types) and default >= 0))  # noqa: E501
-        assert(0 < size <= 8)
+        assert default is None or (isinstance(default, int) and default >= 0)
+        assert 0 < size <= 8
         super(AbstractUVarIntField, self).__init__(name, default)
         self.size = size
         self._max_value = (1 << self.size) - 1
 
-        # Configuring the fake property that is useless for this class but that is  # noqa: E501
-        # expected from BitFields
+        # Configuring the fake property that is useless for this class
+        # but that is expected from BitFields
         self.rev = False
 
     def h2i(self, pkt, x):
@@ -215,7 +211,7 @@ class AbstractUVarIntField(fields.Field):
         :return: int|None: the converted value.
         :raises: AssertionError
         """
-        assert(not isinstance(x, six.integer_types) or x >= 0)
+        assert not isinstance(x, int) or x >= 0
         return x
 
     def i2h(self, pkt, x):
@@ -228,7 +224,7 @@ class AbstractUVarIntField(fields.Field):
         return x
 
     def _detect_multi_byte(self, fb):
-        # type: (str) -> bool
+        # type: (int) -> bool
         """ _detect_multi_byte returns whether the AbstractUVarIntField is represented on  # noqa: E501
           multiple bytes or not.
 
@@ -238,11 +234,10 @@ class AbstractUVarIntField(fields.Field):
         :return: bool: True if multibyte repr detected, else False.
         :raises: AssertionError
         """
-        assert(isinstance(fb, int) or len(fb) == 1)
-        return (orb(fb) & self._max_value) == self._max_value
+        return (fb & self._max_value) == self._max_value
 
     def _parse_multi_byte(self, s):
-        # type: (str) -> int
+        # type: (bytes) -> int
         """ _parse_multi_byte parses x as a multibyte representation to get the
           int value of this AbstractUVarIntField.
 
@@ -252,13 +247,13 @@ class AbstractUVarIntField(fields.Field):
         :raises:: Scapy_Exception if the input value encodes an integer larger than 1<<64  # noqa: E501
         """
 
-        assert(len(s) >= 2)
+        assert len(s) >= 2
 
         tmp_len = len(s)
 
         value = 0
         i = 1
-        byte = orb(s[i])
+        byte = s[i]
         # For CPU sake, stops at an arbitrary large number!
         max_value = 1 << 64
         # As long as the MSG is set, an another byte must be read
@@ -270,15 +265,15 @@ class AbstractUVarIntField(fields.Field):
                 )
             i += 1
             assert i < tmp_len, 'EINVAL: x: out-of-bound read: the string ends before the AbstractUVarIntField!'  # noqa: E501
-            byte = orb(s[i])
+            byte = s[i]
         value += byte << (7 * (i - 1))
         value += self._max_value
 
-        assert(value >= 0)
+        assert value >= 0
         return value
 
     def m2i(self, pkt, x):
-        # type: (Optional[packet.Packet], Union[str, Tuple[str, int]]) -> int
+        # type: (Optional[packet.Packet], Union[bytes, Tuple[bytes, int]]) -> int
         """
           A tuple is expected for the "x" param only if "size" is different than 8. If a tuple is received, some bits  # noqa: E501
           were consumed by another field. This field consumes the remaining bits, therefore the int of the tuple must  # noqa: E501
@@ -288,7 +283,7 @@ class AbstractUVarIntField(fields.Field):
         :param str|(str, int) x: the string to convert. If bits were consumed by a previous bitfield-compatible field.  # noqa: E501
         :raises: AssertionError
         """
-        assert(isinstance(x, bytes) or (isinstance(x, tuple) and x[1] >= 0))
+        assert isinstance(x, bytes) or (isinstance(x, tuple) and x[1] >= 0)
 
         if isinstance(x, tuple):
             assert (8 - x[1]) == self.size, 'EINVAL: x: not enough bits remaining in current byte to read the prefix'  # noqa: E501
@@ -300,36 +295,34 @@ class AbstractUVarIntField(fields.Field):
         if self._detect_multi_byte(val[0]):
             ret = self._parse_multi_byte(val)
         else:
-            ret = orb(val[0]) & self._max_value
+            ret = val[0] & self._max_value
 
-        assert(ret >= 0)
+        assert ret >= 0
         return ret
 
     def i2m(self, pkt, x):
-        # type: (Optional[packet.Packet], int) -> str
+        # type: (Optional[packet.Packet], int) -> bytes
         """
         :param packet.Packet|None pkt: unused.
         :param int x: the value to convert.
         :return: str: the converted value.
         :raises: AssertionError
         """
-        assert(x >= 0)
+        assert x >= 0
 
         if x < self._max_value:
             return chb(x)
         else:
-            # The sl list join is a performance trick, because string
-            # concatenation is not efficient with Python immutable strings
-            sl = [chb(self._max_value)]
+            sl = [self._max_value]
             x -= self._max_value
             while x >= 0x80:
-                sl.append(chb(0x80 | (x & 0x7F)))
+                sl.append(0x80 | (x & 0x7F))
                 x >>= 7
-            sl.append(chb(x))
-            return b''.join(sl)
+            sl.append(x)
+            return bytes(sl)
 
     def any2i(self, pkt, x):
-        # type: (Optional[packet.Packet], Union[None, str, int]) -> Optional[int]  # noqa: E501
+        # type: (Optional[packet.Packet], Union[None, bytes, int]) -> Optional[int]  # noqa: E501
         """
           A "x" value as a string is parsed as a binary encoding of a UVarInt. An int is considered an internal value.  # noqa: E501
           None is returned as is.
@@ -341,14 +334,14 @@ class AbstractUVarIntField(fields.Field):
         """
         if isinstance(x, type(None)):
             return x
-        if isinstance(x, six.integer_types):
-            assert(x >= 0)
+        if isinstance(x, int):
+            assert x >= 0
             ret = self.h2i(pkt, x)
-            assert(isinstance(ret, six.integer_types) and ret >= 0)
+            assert isinstance(ret, int) and ret >= 0
             return ret
         elif isinstance(x, bytes):
             ret = self.m2i(pkt, x)
-            assert (isinstance(ret, six.integer_types) and ret >= 0)
+            assert (isinstance(ret, int) and ret >= 0)
             return ret
         assert False, 'EINVAL: x: No idea what the parameter format is'
 
@@ -362,7 +355,7 @@ class AbstractUVarIntField(fields.Field):
         return repr(self.i2h(pkt, x))
 
     def addfield(self, pkt, s, val):
-        # type: (Optional[packet.Packet], Union[str, Tuple[str, int, int]], int) -> str  # noqa: E501
+        # type: (Optional[packet.Packet], Union[bytes, Tuple[bytes, int, int]], int) -> str  # noqa: E501
         """
           An AbstractUVarIntField prefix always consumes the remaining bits
           of a BitField;if no current BitField is in use (no tuple in
@@ -382,25 +375,30 @@ class AbstractUVarIntField(fields.Field):
           field.
         :raises: AssertionError
         """
-        assert(val >= 0)
+        assert val >= 0
         if isinstance(s, bytes):
             assert self.size == 8, 'EINVAL: s: tuple expected when prefix_len is not a full byte'  # noqa: E501
             return s + self.i2m(pkt, val)
 
         # s is a tuple
-        # assert(s[1] >= 0)
-        # assert(s[2] >= 0)
+        # assert s[1] >= 0
+        # assert s[2] >= 0
         # assert (8 - s[1]) == self.size, 'EINVAL: s: not enough bits remaining in current byte to read the prefix'  # noqa: E501
 
         if val >= self._max_value:
-            return s[0] + chb((s[2] << self.size) + self._max_value) + self.i2m(pkt, val)[1:]  # noqa: E501
+            return (
+                s[0] +
+                chb((s[2] << self.size) + self._max_value) +
+                self.i2m(pkt, val)[1:]
+            )
+
         # This AbstractUVarIntField is only one byte long; setting the prefix value  # noqa: E501
         # and appending the resulting byte to the string
-        return s[0] + chb((s[2] << self.size) + orb(self.i2m(pkt, val)))
+        return s[0] + chb((s[2] << self.size) + self.i2m(pkt, val)[0])
 
     @staticmethod
     def _detect_bytelen_from_str(s):
-        # type: (str) -> int
+        # type: (bytes) -> int
         """ _detect_bytelen_from_str returns the length of the machine
           representation of an AbstractUVarIntField starting at the beginning
           of s and which is assumed to expand over multiple bytes
@@ -410,16 +408,16 @@ class AbstractUVarIntField(fields.Field):
         :return: The bytelength of the AbstractUVarIntField.
         :raises: AssertionError
         """
-        assert(len(s) >= 2)
+        assert len(s) >= 2
         tmp_len = len(s)
 
         i = 1
-        while orb(s[i]) & 0x80 > 0:
+        while s[i] & 0x80 > 0:
             i += 1
             assert i < tmp_len, 'EINVAL: s: out-of-bound read: unfinished AbstractUVarIntField detected'  # noqa: E501
         ret = i + 1
 
-        assert(ret >= 0)
+        assert ret >= 0
         return ret
 
     def i2len(self, pkt, x):
@@ -429,7 +427,7 @@ class AbstractUVarIntField(fields.Field):
         :param int x: the positive or null value whose binary size if requested.  # noqa: E501
         :raises: AssertionError
         """
-        assert(x >= 0)
+        assert x >= 0
         if x < self._max_value:
             return 1
 
@@ -443,7 +441,7 @@ class AbstractUVarIntField(fields.Field):
             i += 1
 
         ret = i
-        assert(ret >= 0)
+        assert ret >= 0
         return ret
 
     def getfield(self, pkt, s):
@@ -460,10 +458,10 @@ class AbstractUVarIntField(fields.Field):
         :raises: AssertionError
         """
         if isinstance(s, tuple):
-            assert(len(s) == 2)
+            assert len(s) == 2
             temp = s  # type: Tuple[str, int]
             ts, ti = temp
-            assert(ti >= 0)
+            assert ti >= 0
             assert 8 - ti == self.size, 'EINVAL: s: not enough bits remaining in current byte to read the prefix'  # noqa: E501
             val = ts
         else:
@@ -476,7 +474,7 @@ class AbstractUVarIntField(fields.Field):
             tmp_len = 1
 
         ret = val[tmp_len:], self.m2i(pkt, s)
-        assert(ret[1] >= 0)
+        assert ret[1] >= 0
         return ret
 
     def randval(self):
@@ -495,8 +493,8 @@ class UVarIntField(AbstractUVarIntField):
         :param default: the default value for this field instance. default must be positive or null.  # noqa: E501
         :raises: AssertionError
         """
-        assert(default >= 0)
-        assert(0 < size <= 8)
+        assert default >= 0
+        assert 0 < size <= 8
 
         super(UVarIntField, self).__init__(name, default, size)
         self.size = size
@@ -516,7 +514,7 @@ class UVarIntField(AbstractUVarIntField):
         :raises: AssertionError
         """
         ret = super(UVarIntField, self).h2i(pkt, x)
-        assert(not isinstance(ret, type(None)) and ret >= 0)
+        assert not isinstance(ret, type(None)) and ret >= 0
         return ret
 
     def i2h(self, pkt, x):
@@ -529,7 +527,7 @@ class UVarIntField(AbstractUVarIntField):
         :raises: AssertionError
         """
         ret = super(UVarIntField, self).i2h(pkt, x)
-        assert(not isinstance(ret, type(None)) and ret >= 0)
+        assert not isinstance(ret, type(None)) and ret >= 0
         return ret
 
     def any2i(self, pkt, x):
@@ -542,7 +540,7 @@ class UVarIntField(AbstractUVarIntField):
         :raises: AssertionError
         """
         ret = super(UVarIntField, self).any2i(pkt, x)
-        assert(not isinstance(ret, type(None)) and ret >= 0)
+        assert not isinstance(ret, type(None)) and ret >= 0
         return ret
 
     def i2repr(self, pkt, x):
@@ -577,8 +575,8 @@ class FieldUVarLenField(AbstractUVarIntField):
         :return: None
         :raises: AssertionError
         """
-        assert(default is None or default >= 0)
-        assert(0 < size <= 8)
+        assert default is None or default >= 0
+        assert 0 < size <= 8
 
         super(FieldUVarLenField, self).__init__(name, default, size)
         self._length_of = length_of
@@ -633,7 +631,7 @@ class FieldUVarLenField(AbstractUVarIntField):
         fld, fval = pkt.getfield_and_val(self._length_of)
         val = fld.i2len(pkt, fval)
         ret = self._adjust(val)
-        assert(ret >= 0)
+        assert ret >= 0
         return ret
 
 ###############################################################################
@@ -641,18 +639,13 @@ class FieldUVarLenField(AbstractUVarIntField):
 ###############################################################################
 
 
-@six.add_metaclass(abc.ABCMeta)
-class HPackStringsInterface(Sized):  # type: ignore
+class HPackStringsInterface(Sized, metaclass=abc.ABCMeta):  # type: ignore
     @abc.abstractmethod
-    def __str__(self):
+    def __bytes__(self):
         pass
 
-    def __bytes__(self):
-        r = self.__str__()
-        return bytes_encode(r)
-
     @abc.abstractmethod
-    def origin(self):
+    def origin(self) -> str:
         pass
 
     @abc.abstractmethod
@@ -668,15 +661,15 @@ class HPackLiteralString(HPackStringsInterface):
 
     def __init__(self, s):
         # type: (str) -> None
-        self._s = s
+        self._s = plain_str(s)
 
-    def __str__(self):
-        # type: () -> str
-        return self._s
+    def __bytes__(self):
+        # type: () -> bytes
+        return self._s.encode()
 
     def origin(self):
         # type: () -> str
-        return plain_str(self._s)
+        return self._s
 
     def __len__(self):
         # type: () -> int
@@ -1004,7 +997,7 @@ class HPackZString(HPackStringsInterface):
 
     @classmethod
     def _huffman_encode_char(cls, c):
-        # type: (Union[str, EOS]) -> Tuple[int, int]
+        # type: (Union[int, EOS]) -> Tuple[int, int]
         """ huffman_encode_char assumes that the static_huffman_tree was
         previously initialized
 
@@ -1015,8 +1008,8 @@ class HPackZString(HPackStringsInterface):
         if isinstance(c, EOS):
             return cls.static_huffman_code[-1]
         else:
-            assert(isinstance(c, int) or len(c) == 1)
-        return cls.static_huffman_code[orb(c)]
+            assert isinstance(c, int)
+        return cls.static_huffman_code[c]
 
     @classmethod
     def huffman_encode(cls, s):
@@ -1030,6 +1023,7 @@ class HPackZString(HPackStringsInterface):
         """
         i = 0
         ibl = 0
+        s = bytes_encode(s)
         for c in s:
             val, bl = cls._huffman_encode_char(c)
             i = (i << bl) + val
@@ -1042,35 +1036,46 @@ class HPackZString(HPackStringsInterface):
             ibl += padlen
 
         ret = i, ibl
-        assert(ret[0] >= 0)
+        assert ret[0] >= 0
         assert (ret[1] >= 0)
         return ret
 
     @classmethod
     def huffman_decode(cls, i, ibl):
-        # type: (int, int) -> str
+        # type: (Union[int, bytes], int) -> str
         """ huffman_decode decodes the bitstring provided as parameters.
 
-        :param int i: the bitstring to decode
+        :param int|bytes i: the bitstring to decode
         :param int ibl: the bitlength of i
         :return: str: the string decoded from the bitstring
         :raises: AssertionError, InvalidEncodingException
         """
-        assert(i >= 0)
-        assert(ibl >= 0)
+        assert isinstance(i, bytes) or i >= 0
+        assert ibl >= 0
+
+        if isinstance(i, int):
+            byte_len = (ibl + 7) // 8
+            i &= (1 << ibl) - 1
+            encoded = i.to_bytes(byte_len, byteorder='big')
+            bit_pos = 7 - (byte_len * 8 - ibl)
+        else:
+            assert ibl <= len(i) * 8
+            encoded = i
+            bit_pos = 7
 
         if isinstance(cls.static_huffman_tree, type(None)):
             cls.huffman_compute_decode_tree()
-        assert(not isinstance(cls.static_huffman_tree, type(None)))
+        assert not isinstance(cls.static_huffman_tree, type(None))
 
         s = []
-        j = 0
+        byte_pos = 0
+        bits_left = ibl
         interrupted = False
         cur = cls.static_huffman_tree
         cur_sym = 0
         cur_sym_bl = 0
-        while j < ibl:
-            b = (i >> (ibl - j - 1)) & 1
+        while bits_left:
+            b = (encoded[byte_pos] >> bit_pos) & 1
             cur_sym = (cur_sym << 1) + b
             cur_sym_bl += 1
             elmt = cur[b]
@@ -1081,7 +1086,9 @@ class HPackZString(HPackStringsInterface):
                 if isinstance(cur, type(None)):
                     raise AssertionError()
             elif isinstance(elmt, EOS):
-                raise InvalidEncodingException('Huffman decoder met the full EOS symbol')  # noqa: E501
+                raise InvalidEncodingException(
+                    'Huffman decoder met the full EOS symbol'
+                )
             elif isinstance(elmt, bytes):
                 interrupted = False
                 s.append(elmt)
@@ -1089,25 +1096,49 @@ class HPackZString(HPackStringsInterface):
                 cur_sym = 0
                 cur_sym_bl = 0
             else:
-                raise InvalidEncodingException('Should never happen, so incidentally it will')  # noqa: E501
-            j += 1
+                raise InvalidEncodingException(
+                    'Should never happen, so incidentally it will'
+                )
+            bit_pos -= 1
+            if bit_pos < 0:
+                byte_pos += 1
+                bit_pos = 7
+            bits_left -= 1
 
         if interrupted:
             # Interrupted values true if the bitstring ends in the middle of a
             # symbol; this symbol must be, according to RFC7541 par5.2 the MSB
             # of the EOS symbol
             if cur_sym_bl > 7:
-                raise InvalidEncodingException('Huffman decoder is detecting padding longer than 7 bits')  # noqa: E501
+                raise InvalidEncodingException(
+                    'Huffman decoder is detecting padding longer than 7 bits'
+                )
             eos_symbol = cls.static_huffman_code[-1]
             eos_msb = eos_symbol[0] >> (eos_symbol[1] - cur_sym_bl)
             if eos_msb != cur_sym:
-                raise InvalidEncodingException('Huffman decoder is detecting unexpected padding format')  # noqa: E501
-        return b''.join(s)
+                raise InvalidEncodingException(
+                    'Huffman decoder is detecting unexpected padding format'
+                )
+        s = b''.join(s)
+        return s.decode()
 
     @classmethod
-    def huffman_conv2str(cls, bit_str, bit_len):
-        # type: (int, int) -> str
-        """ huffman_conv2str converts a bitstring of bit_len bitlength into a
+    def from_encoded(cls, encoded):
+        # type: (bytes) -> HPackZString
+        """Create an HPackZString from Huffman-coded wire bytes.
+
+        :param bytes encoded: complete Huffman-coded string with padding
+        :return: decoded compressed-string representation
+        """
+        value = cls.__new__(cls)
+        value._s = cls.huffman_decode(encoded, len(encoded) * 8)
+        value._encoded = encoded
+        return value
+
+    @classmethod
+    def huffman_conv2bytes(cls, bit_str, bit_len):
+        # type: (int, int) -> bytes
+        """ huffman_conv2bytes converts a bitstring of bit_len bitlength into a
         binary string. It DOES NOT compress/decompress the bitstring!
 
         :param int bit_str: the bitstring to convert.
@@ -1115,8 +1146,8 @@ class HPackZString(HPackStringsInterface):
         :return: str: the converted bitstring as a bytestring.
         :raises: AssertionError
         """
-        assert(bit_str >= 0)
-        assert(bit_len >= 0)
+        assert bit_str >= 0
+        assert bit_len >= 0
 
         byte_len = bit_len // 8
         rem_bit = bit_len % 8
@@ -1124,14 +1155,12 @@ class HPackZString(HPackStringsInterface):
             bit_str <<= 8 - rem_bit
             byte_len += 1
 
-        # As usual the list/join tricks is a performance trick to build
-        # efficiently a Python string
-        s = []  # type: List[str]
+        s = []  # type: List[int]
         i = 0
         while i < byte_len:
-            s.insert(0, chb((bit_str >> (i * 8)) & 0xFF))
+            s.insert(0, (bit_str >> (i * 8)) & 0xFF)
             i += 1
-        return b''.join(s)
+        return bytes(s)
 
     @classmethod
     def huffman_conv2bitstring(cls, s):
@@ -1147,11 +1176,11 @@ class HPackZString(HPackStringsInterface):
         i = 0
         ibl = len(s) * 8
         for c in s:
-            i = (i << 8) + orb(c)
+            i = (i << 8) + c
 
         ret = i, ibl
-        assert(ret[0] >= 0)
-        assert(ret[1] >= 0)
+        assert ret[0] >= 0
+        assert ret[1] >= 0
         return ret
 
     @classmethod
@@ -1169,7 +1198,9 @@ class HPackZString(HPackStringsInterface):
             for idx in range(entry[1] - 1, -1, -1):
                 b = (entry[0] >> idx) & 1
                 if isinstance(parent[b], bytes):
-                    raise InvalidEncodingException('Huffman unique prefix violation :/')  # noqa: E501
+                    raise InvalidEncodingException(
+                        'Huffman unique prefix violation :/'
+                    )
                 if idx == 0:
                     parent[b] = chb(i) if i < 256 else EOS()
                 elif parent[b] is None:
@@ -1179,17 +1210,17 @@ class HPackZString(HPackStringsInterface):
 
     def __init__(self, s):
         # type: (str) -> None
-        self._s = s
-        i, ibl = type(self).huffman_encode(s)
-        self._encoded = type(self).huffman_conv2str(i, ibl)
+        self._s = plain_str(s)
+        i, ibl = type(self).huffman_encode(self._s)
+        self._encoded = type(self).huffman_conv2bytes(i, ibl)
 
-    def __str__(self):
-        # type: () -> str
+    def __bytes__(self):
+        # type: () -> bytes
         return self._encoded
 
     def origin(self):
         # type: () -> str
-        return plain_str(self._s)
+        return self._s
 
     def __len__(self):
         # type: () -> int
@@ -1199,12 +1230,18 @@ class HPackZString(HPackStringsInterface):
 class HPackStrLenField(fields.Field):
     """ HPackStrLenField is a StrLenField variant specialized for HTTP/2 HPack
 
-    This variant uses an internal representation that implements HPackStringsInterface.  # noqa: E501
+    This variant uses an internal representation that implements
+    HPackStringsInterface.
     """
     __slots__ = ['_length_from', '_type_from']
 
-    def __init__(self, name, default, length_from, type_from):
-        # type: (str, HPackStringsInterface, Callable[[packet.Packet], int], str) -> None  # noqa: E501
+    def __init__(
+        self,
+        name: str,
+        default: HPackStringsInterface,
+        length_from: Callable[[packet.Packet], int],
+        type_from: str,
+    ) -> None:
         super(HPackStrLenField, self).__init__(name, default)
         self._length_from = length_from
         self._type_from = type_from
@@ -1219,21 +1256,21 @@ class HPackStrLenField(fields.Field):
         """
         :param bool t: whether this string is a huffman compressed string.
         :param str s: the string to parse.
-        :return: HPackStringsInterface: either a HPackLiteralString or HPackZString, depending on t.  # noqa: E501
+        :return: HPackStringsInterface: either a HPackLiteralString or HPackZString,
+            depending on t.
         :raises: InvalidEncodingException
         """
         if t:
-            i, ibl = HPackZString.huffman_conv2bitstring(s)
-            return HPackZString(HPackZString.huffman_decode(i, ibl))
+            return HPackZString.from_encoded(s)
         return HPackLiteralString(s)
 
     def getfield(self, pkt, s):
         # type: (packet.Packet, str) -> Tuple[str, HPackStringsInterface]
         """
-        :param packet.Packet pkt: the packet instance containing this field instance.  # noqa: E501
+        :param packet.Packet pkt: the packet instance containing this field instance.
         :param str s: the string to parse this field from.
-        :return: (str, HPackStringsInterface): the remaining string after this field was carved out & the extracted  # noqa: E501
-          value.
+        :return: (str, HPackStringsInterface): the remaining string after this field
+            was carved out & the extracted value.
         :raises: KeyError if "type_from" is not a field of pkt or its payloads.
         :raises: InvalidEncodingException
         """
@@ -1257,9 +1294,9 @@ class HPackStrLenField(fields.Field):
     def m2i(self, pkt, x):
         # type: (packet.Packet, str) -> HPackStringsInterface
         """
-        :param packet.Packet pkt: the packet instance containing this field instance.  # noqa: E501
+        :param packet.Packet pkt: the packet instance containing this field instance.
         :param str x: the string to parse.
-        :return: HPackStringsInterface: the internal type of the value parsed from x.  # noqa: E501
+        :return: HPackStringsInterface: the internal type of the value parsed from x.
         :raises: AssertionError
         :raises: InvalidEncodingException
         :raises: KeyError if _type_from is not one of pkt fields.
@@ -1267,27 +1304,32 @@ class HPackStrLenField(fields.Field):
         t = pkt.getfieldval(self._type_from)
         tmp_len = self._length_from(pkt)
 
-        assert t is not None and tmp_len is not None, 'Conversion from string impossible: no type or length specified'  # noqa: E501
+        assert t is not None and tmp_len is not None, \
+            'Conversion from string impossible: no type or length specified'
 
         return self._parse(t == 1, x[:tmp_len])
 
-    def any2i(self, pkt, x):
-        # type: (Optional[packet.Packet], Union[str, HPackStringsInterface]) -> HPackStringsInterface  # noqa: E501
+    def any2i(
+        self,
+        pkt: Optional[packet.Packet],
+        x: Union[str, HPackStringsInterface],
+    ) -> HPackStringsInterface:
         """
-        :param packet.Packet|None pkt: the packet instance containing this field instance.  # noqa: E501
+        :param packet.Packet|None pkt: the packet instance containing this field
+            instance.
         :param str|HPackStringsInterface x: the value to convert
         :return: HPackStringsInterface: the Scapy internal value for this field
         :raises: AssertionError, InvalidEncodingException
         """
         if isinstance(x, bytes):
-            assert(isinstance(pkt, packet.Packet))
+            assert isinstance(pkt, packet.Packet)
             return self.m2i(pkt, x)
-        assert(isinstance(x, HPackStringsInterface))
+        assert isinstance(x, HPackStringsInterface)
         return x
 
     def i2m(self, pkt, x):
-        # type: (Optional[packet.Packet], HPackStringsInterface) -> str
-        return raw(x)
+        # type: (Optional[packet.Packet], HPackStringsInterface) -> bytes
+        return bytes(x)
 
     def i2len(self, pkt, x):
         # type: (Optional[packet.Packet], HPackStringsInterface) -> int
@@ -1347,7 +1389,7 @@ class HPackHeaders(packet.Packet):
         """
         if s is None:
             return config.conf.raw_layer
-        fb = orb(s[0])
+        fb = s[0]
         if fb & 0x80 != 0:
             return HPackIndexedHdr
         if fb & 0x40 != 0:
@@ -1478,7 +1520,7 @@ class H2PaddedDataFrame(H2DataFrame):
         padding_len_len = fld.i2len(self, fval)
 
         ret = self.s_len - padding_len_len - padding_len
-        assert(ret >= 0)
+        assert ret >= 0
         return ret
 
     def pre_dissect(self, s):
@@ -1559,7 +1601,7 @@ class H2PaddedHeadersFrame(H2AbstractHeadersFrame):
         padding_len_len = fld.i2len(self, fval)
 
         ret = self.s_len - padding_len_len - padding_len
-        assert(ret >= 0)
+        assert ret >= 0
         return ret
 
     def pre_dissect(self, s):
@@ -1637,7 +1679,7 @@ class H2PaddedPriorityHeadersFrame(H2AbstractHeadersFrame):
                   (bit_cnt / 8) -
                   weight_len
                   )
-        assert(ret >= 0)
+        assert ret >= 0
         return ret
 
     def pre_dissect(self, s):
@@ -1778,7 +1820,7 @@ class H2SettingsFrame(H2FramePayload):
         """
 
         # RFC7540 par6.5 p36
-        assert(
+        assert (
             len(args) == 0 or (
                 isinstance(args[0], bytes) and
                 len(args[0]) % 6 == 0
@@ -1848,7 +1890,7 @@ class H2PaddedPushPromiseFrame(H2PushPromiseFrame):
                   padding_len -
                   (bit_len / 8)
                   )
-        assert(ret >= 0)
+        assert ret >= 0
         return ret
 
     def pre_dissect(self, s):
@@ -1885,10 +1927,9 @@ class H2PingFrame(H2FramePayload):
         :raises: AssertionError
         """
         # RFC7540 par6.7 p42
-        assert(
+        assert (
             len(args) == 0 or (
-                (isinstance(args[0], bytes) or
-                 isinstance(args[0], str)) and
+                isinstance(args[0], (bytes, str)) and
                 len(args[0]) == 8
             )
         ), 'Invalid ping frame; length is not 8'
@@ -1929,10 +1970,9 @@ class H2WindowUpdateFrame(H2FramePayload):
         :raises: AssertionError
         """
         # RFC7540 par6.9 p46
-        assert(
+        assert (
             len(args) == 0 or (
-                (isinstance(args[0], bytes) or
-                 isinstance(args[0], str)) and
+                isinstance(args[0], (bytes, str)) and
                 len(args[0]) == 4
             )
         ), 'Invalid window update frame; length is not 4'
@@ -2060,7 +2100,7 @@ class H2Frame(packet.Packet):
         :return: (str, str): the padding and the payload data strings
         :raises: AssertionError
         """
-        assert isinstance(self.len, six.integer_types) and self.len >= 0, 'Invalid length: negative len?'  # noqa: E501
+        assert isinstance(self.len, int) and self.len >= 0, 'Invalid length: negative len?'  # noqa: E501
         assert len(s) >= self.len, 'Invalid length: string too short for this length'  # noqa: E501
         return s[:self.len], s[self.len:]
 
@@ -2075,7 +2115,7 @@ class H2Frame(packet.Packet):
         # This logic, while awkward in the post_build and more reasonable in
         # a self_build is implemented here for performance tricks reason
         if self.getfieldval('len') is None:
-            assert(len(pay) < (1 << 24)), 'Invalid length: payload is too long'
+            assert len(pay) < (1 << 24), 'Invalid length: payload is too long'
             p = struct.pack('!L', len(pay))[1:] + p[3:]
         return super(H2Frame, self).post_build(p, pay)
 
@@ -2114,7 +2154,9 @@ packet.bind_layers(H2Frame, H2ContinuationFrame, {'type': H2ContinuationFrame.ty
 
 #                                          HTTP/2 Connection Preface                                                   #  # noqa: E501
 # From RFC 7540 par3.5
-H2_CLIENT_CONNECTION_PREFACE = hex_bytes('505249202a20485454502f322e300d0a0d0a534d0d0a0d0a')  # noqa: E501
+H2_CLIENT_CONNECTION_PREFACE = bytes.fromhex(
+    '505249202a20485454502f322e300d0a0d0a534d0d0a0d0a'
+)
 
 
 ###############################################################################
@@ -2134,7 +2176,7 @@ class HPackHdrEntry(Sized):
         """
         :raises: AssertionError
         """
-        assert(len(name) > 0)
+        assert len(name) > 0
 
         self._name = name.lower()
         self._value = value
@@ -2167,9 +2209,6 @@ class HPackHdrEntry(Sized):
             return "{} {}".format(self._name, self._value)
         else:
             return "{}: {}".format(self._name, self._value)
-
-    def __bytes__(self):
-        return bytes_encode(self.__str__())
 
 
 class HPackHdrTable(Sized):
@@ -2300,7 +2339,7 @@ class HPackHdrTable(Sized):
           raised
         :raises: KeyError, AssertionError
         """
-        assert(idx >= 0)
+        assert idx >= 0
         if idx > type(self)._static_entries_last_idx:
             idx -= type(self)._static_entries_last_idx + 1
             if idx >= len(self._dynamic_table):
@@ -2333,7 +2372,7 @@ class HPackHdrTable(Sized):
         :param int nc: the new cap of the dynamic table (that is the maximum-maximum size)  # noqa: E501
         :raises: AssertionError
         """
-        assert(nc >= 0)
+        assert nc >= 0
         t = self._dynamic_table_cap_size > nc
         self._dynamic_table_cap_size = nc
 
@@ -2352,7 +2391,7 @@ class HPackHdrTable(Sized):
         the RFC7541 definition of the size of an entry)
         :raises: AssertionError
         """
-        assert(new_entry_size >= 0)
+        assert new_entry_size >= 0
         cur_sz = len(self)
         dyn_tbl_sz = len(self._dynamic_table)
         while dyn_tbl_sz > 0 and cur_sz + new_entry_size > self._dynamic_table_max_size:  # noqa: E501
@@ -2404,7 +2443,7 @@ class HPackHdrTable(Sized):
             # then throw an assertion error if the new entry does not fit in
             new_entry_len = len(entry)
             self._reduce_dynamic_table(new_entry_len)
-            assert(new_entry_len <= self._dynamic_table_max_size)
+            assert new_entry_len <= self._dynamic_table_max_size
             self._dynamic_table.insert(0, entry)
 
     def get_idx_by_name(self, name):
@@ -2418,7 +2457,7 @@ class HPackHdrTable(Sized):
         If no matching header is found, this method returns None.
         """
         name = name.lower()
-        for key, val in six.iteritems(type(self)._static_entries):
+        for key, val in type(self)._static_entries.items():
             if val.name() == name:
                 return key
         for idx, val in enumerate(self._dynamic_table):
@@ -2437,7 +2476,7 @@ class HPackHdrTable(Sized):
         If no matching header is found, this method returns None.
         """
         name = name.lower()
-        for key, val in six.iteritems(type(self)._static_entries):
+        for key, val in type(self)._static_entries.items():
             if val.name() == name and val.value() == value:
                 return key
         for idx, val in enumerate(self._dynamic_table):
@@ -2461,7 +2500,7 @@ class HPackHdrTable(Sized):
 
         :param H2Frame|list of HPackHeaders hdrs: the list of headers to
           convert to textual representation.
-        :param bool: whether incremental headers should be added to the dynamic
+        :param bool register: whether incremental headers should be added to the dynamic
           table as we generate the text representation
         :return: str: the textual representation of the provided headers
         :raises: AssertionError
@@ -2625,7 +2664,7 @@ class HPackHdrTable(Sized):
         return plain_str(hdr_name.lower()), plain_str(grp.group(3))
 
     def parse_txt_hdrs(self,
-                       s,  # type: str
+                       s,  # type: Union[bytes, str]
                        stream_id=1,  # type: int
                        body=None,  # type: Optional[str]
                        max_frm_sz=4096,  # type: int
@@ -2671,9 +2710,9 @@ class HPackHdrTable(Sized):
         :raises: Exception
         """
 
-        sio = BytesIO(s)
+        sio = BytesIO(s.encode() if isinstance(s, str) else s)
 
-        base_frm_len = len(raw(H2Frame()))
+        base_frm_len = len(bytes(H2Frame()))
 
         ret = H2Seq()
         cur_frm = H2HeadersFrame()  # type: Union[H2HeadersFrame, H2ContinuationFrame]  # noqa: E501
@@ -2688,7 +2727,7 @@ class HPackHdrTable(Sized):
             new_hdr, new_hdr_len = self._convert_a_header_to_a_h2_header(
                 hdr_name, hdr_value, is_sensitive, should_index
             )
-            new_hdr_bin_len = len(raw(new_hdr))
+            new_hdr_bin_len = len(bytes(new_hdr))
 
             if register and isinstance(new_hdr, HPackLitHdrFldWithIncrIndexing):  # noqa: E501
                 self.register(new_hdr)
@@ -2702,7 +2741,7 @@ class HPackHdrTable(Sized):
                     (max_hdr_lst_sz != 0 and new_hdr_len > max_hdr_lst_sz)):
                 raise Exception('Header too long: {}'.format(hdr_name))
 
-            if (max_frm_sz < len(raw(cur_frm)) + base_frm_len + new_hdr_len or
+            if (max_frm_sz < len(bytes(cur_frm)) + base_frm_len + new_hdr_len or
                 (
                     max_hdr_lst_sz != 0 and
                     max_hdr_lst_sz < cur_hdr_sz + new_hdr_len
@@ -2725,7 +2764,7 @@ class HPackHdrTable(Sized):
         ret.frames.append(H2Frame(stream_id=stream_id, flags=flags) / cur_frm)
 
         if body:
-            base_data_frm_len = len(raw(H2DataFrame()))
+            base_data_frm_len = len(bytes(H2DataFrame()))
             sio = BytesIO(body)
             frgmt = sio.read(max_frm_sz - base_data_frm_len - base_frm_len)
             while frgmt:

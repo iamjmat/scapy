@@ -1,22 +1,8 @@
-# This file is part of Scapy.
-# See http://www.secdev.org/projects/scapy for more information.
-#
-# Scapy is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 2 of the License, or
-# (at your option) any later version.
-#
-# Scapy is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Scapy.  If not, see <http://www.gnu.org/licenses/>.
-#
+# SPDX-License-Identifier: GPL-2.0-or-later
+# This file is part of Scapy
+# See https://scapy.net/ for more information
 # Copyright (C) 2020 Rahul Jadhav <nyrahul@gmail.com>
 
-# RFC 6551
 # scapy.contrib.description = Routing Metrics used for Path Calc in LLNs
 # scapy.contrib.status = loads
 
@@ -33,15 +19,14 @@ RFC 6551 - Routing Metrics Used for Path Calculation in LLNs
 """
 
 import struct
-from scapy.compat import orb
 from scapy.packet import Packet
 from scapy.fields import ByteEnumField, ByteField, ShortField, BitField, \
-    BitEnumField, FieldLenField, StrLenField, IntField
-from scapy.layers.inet6 import _PhantomAutoPadField, _OptionsField
-from scapy.contrib.rpl import RPLOPTSSTR, RPLOPTS
+    BitEnumField, FieldLenField, StrLenField, IntField, PacketListField
+from scapy.layers.inet6 import _PhantomAutoPadField
+from scapy.contrib.rpl import RPLOPTSSTR, RPLOPTS, _RPLGuessOption
 
 
-class _DAGMetricContainer(Packet):
+class _DAGMetricContainer(_RPLGuessOption):
     name = 'Dummy DAG Metric container'
 
     def post_build(self, pkt, pay):
@@ -79,7 +64,7 @@ class DAGMCObjUnknown(Packet):
         Dispatch hook for DAGMC sub-fields
         """
         if _pkt:
-            opt_type = orb(_pkt[0])  # Option type
+            opt_type = _pkt[0]  # Option type
             if opt_type in DAGMC_CLS:
                 return DAGMC_CLS[opt_type]
         return cls
@@ -114,6 +99,12 @@ class DAGMCObj(Packet):
             tmp_len = len(pkt) - 4
         pkt = pkt[:3] + struct.pack("B", tmp_len) + pkt[4:]
         return pkt
+
+    def extract_padding(self, s):
+        # RFC 6551 - 2.1: the body is `len` octets after the 4-octet
+        # header, and the next object of the container starts after it
+        tmp_len = max(self.len - (len(self.self_build()) - 4), 0)
+        return s[:tmp_len], s[tmp_len:]
 
 
 class RPLDAGMCNSA(DAGMCObj):
@@ -253,8 +244,8 @@ class RPLOptDAGMC(_DAGMetricContainer):
     fields_desc = [ByteEnumField("otype", 2, RPLOPTSSTR),
                    ByteField("len", None),
                    _PhantomAutoPadField("autopad", 0),
-                   _OptionsField("options", [], DAGMCObjUnknown, 8,
-                                 length_from=lambda pkt: 8 * pkt.len)]
+                   PacketListField("options", [], DAGMCObjUnknown,
+                                   length_from=lambda pkt: pkt.len)]
 
 
 # https://www.iana.org/assignments/rpl/rpl.xhtml#control-message-options

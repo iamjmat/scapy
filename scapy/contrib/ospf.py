@@ -1,28 +1,17 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# This file is part of Scapy
+# See https://scapy.net/ for more information
+# Copyright (c) 2008 Dirk Loss <dirk-loss de>
+# Copyright (c) 2010 Jochen Bartl <jochen.bartl gmail com>
+
 # scapy.contrib.description = Open Shortest Path First (OSPF)
 # scapy.contrib.status = loads
-
-# This file is part of Scapy
-# Scapy is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 2 of the License, or
-# any later version.
-#
-# Scapy is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Scapy. If not, see <http://www.gnu.org/licenses/>.
 
 """
 OSPF extension for Scapy <http://www.secdev.org/scapy>
 
 This module provides Scapy layers for the Open Shortest Path First
 routing protocol as defined in RFC 2328 and RFC 5340.
-
-Copyright (c) 2008 Dirk Loss  :  mail dirk-loss de
-Copyright (c) 2010 Jochen Bartl  :  jochen.bartl gmail com
 """
 
 
@@ -37,7 +26,6 @@ from scapy.fields import BitField, ByteEnumField, ByteField, \
 from scapy.layers.inet import IP, DestIPField
 from scapy.layers.inet6 import IPv6, in6_chksum
 from scapy.utils import fletcher16_checkbytes, checksum, inet_aton
-from scapy.compat import orb
 from scapy.config import conf
 
 EXT_VERSION = "v0.9.2"
@@ -265,7 +253,7 @@ def _LSAGuessPayloadClass(p, **kargs):
 
     cls = conf.raw_layer
     if len(p) >= 4:
-        typ = orb(p[3])
+        typ = p[3]
         clsname = _OSPF_LSclasses.get(typ, "Raw")
         cls = globals()[clsname]
     return cls(p, **kargs)
@@ -407,13 +395,17 @@ class OSPF_AS_Scope_Opaque_LSA(OSPF_Link_Scope_Opaque_LSA):
 
 class OSPF_DBDesc(Packet):
     name = "OSPF Database Description"
-    fields_desc = [ShortField("mtu", 1500),
-                   OSPFOptionsField(),
-                   FlagsField("dbdescr", 0, 8, ["MS", "M", "I", "R", "4", "3", "2", "1"]),  # noqa: E501
-                   IntField("ddseq", 1),
-                   PacketListField("lsaheaders", None, OSPF_LSA_Hdr,
-                                   count_from=lambda pkt: None,
-                                   length_from=lambda pkt: pkt.underlayer.len - 24 - 8)]  # noqa: E501
+    fields_desc = [
+        ShortField("mtu", 1500),
+        OSPFOptionsField(),
+        FlagsField("dbdescr", 0, 8, ["MS", "M", "I", "R", "4", "3", "2", "1"]),
+        IntField("ddseq", 1),
+        PacketListField(
+            "lsaheaders", None, OSPF_LSA_Hdr,
+            count_from=lambda pkt: None,
+            length_from=lambda pkt: pkt.underlayer and pkt.underlayer.len - 24 - 8,
+        )
+    ]
 
     def guess_payload_class(self, payload):
         # check presence of LLS data block flag
@@ -435,24 +427,36 @@ class OSPF_LSReq_Item(Packet):
 
 class OSPF_LSReq(Packet):
     name = "OSPF Link State Request (container)"
-    fields_desc = [PacketListField("requests", None, OSPF_LSReq_Item,
-                                   count_from=lambda pkt:None,
-                                   length_from=lambda pkt:pkt.underlayer.len - 24)]  # noqa: E501
+    fields_desc = [
+        PacketListField(
+            "requests", None, OSPF_LSReq_Item,
+            count_from=lambda pkt: None,
+            length_from=lambda pkt: pkt.underlayer and pkt.underlayer.len - 24,
+        )
+    ]
 
 
 class OSPF_LSUpd(Packet):
     name = "OSPF Link State Update"
-    fields_desc = [FieldLenField("lsacount", None, fmt="!I", count_of="lsalist"),  # noqa: E501
-                   PacketListField("lsalist", None, _LSAGuessPayloadClass,
-                                   count_from=lambda pkt: pkt.lsacount,
-                                   length_from=lambda pkt: pkt.underlayer.len - 24)]  # noqa: E501
+    fields_desc = [
+        FieldLenField("lsacount", None, fmt="!I", count_of="lsalist"),
+        PacketListField(
+            "lsalist", None, _LSAGuessPayloadClass,
+            count_from=lambda pkt: pkt.lsacount,
+            length_from=lambda pkt: pkt.underlayer and pkt.underlayer.len - 24,
+        )
+    ]
 
 
 class OSPF_LSAck(Packet):
     name = "OSPF Link State Acknowledgement"
-    fields_desc = [PacketListField("lsaheaders", None, OSPF_LSA_Hdr,
-                                   count_from=lambda pkt: None,
-                                   length_from=lambda pkt: pkt.underlayer.len - 24)]  # noqa: E501
+    fields_desc = [
+        PacketListField(
+            "lsaheaders", None, OSPF_LSA_Hdr,
+            count_from=lambda pkt: None,
+            length_from=lambda pkt: pkt.underlayer and pkt.underlayer.len - 24,
+        )
+    ]
 
     def answers(self, other):
         if isinstance(other, OSPF_LSUpd):

@@ -1,8 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # This file is part of Scapy
+# See https://scapy.net/ for more information
 # Copyright (C) 2007, 2008, 2009 Arnaud Ebalard
 #               2015, 2016, 2017 Maxence Tury
 #               2019 Romain Perez
-# This program is published under a GPLv2 license
 
 """
 TLS server automaton. This makes for a primitive TLS stack.
@@ -10,13 +11,13 @@ Obviously you need rights for network access.
 
 We support versions SSLv2 to TLS 1.3, along with many features.
 
-In order to run a server listening on tcp/4433:
-> from scapy.all import *
-> t = TLSServerAutomaton(mycert='<cert.pem>', mykey='<key.pem>')
-> t.run()
+In order to run a server listening on tcp/4433::
+
+    from scapy.layers.tls import *
+    t = TLSServerAutomaton(mycert='<cert.pem>', mykey='<key.pem>')
+    t.run()
 """
 
-from __future__ import print_function
 import socket
 import binascii
 import struct
@@ -29,17 +30,28 @@ from scapy.utils import get_temp_file, randstring, repr_hex
 from scapy.automaton import ATMT
 from scapy.error import warning
 from scapy.layers.tls.automaton import _TLSAutomaton
-from scapy.layers.tls.cert import PrivKeyRSA, PrivKeyECDSA
+from scapy.layers.tls.cert import PrivKeyRSA, PrivKeyECDSA, PrivKeyEdDSA, CertList
 from scapy.layers.tls.basefields import _tls_version
 from scapy.layers.tls.session import tlsSession
 from scapy.layers.tls.crypto.groups import _tls_named_groups
-from scapy.layers.tls.extensions import TLS_Ext_SupportedVersion_SH, \
-    TLS_Ext_SupportedGroups, TLS_Ext_Cookie, \
-    TLS_Ext_SignatureAlgorithms, TLS_Ext_PSKKeyExchangeModes, \
-    TLS_Ext_EarlyDataIndicationTicket
-from scapy.layers.tls.keyexchange_tls13 import TLS_Ext_KeyShare_SH, \
-    KeyShareEntry, TLS_Ext_KeyShare_HRR, TLS_Ext_PreSharedKey_CH, \
-    TLS_Ext_PreSharedKey_SH
+from scapy.layers.tls.extensions import (
+    TLS_Ext_Cookie,
+    TLS_Ext_EarlyDataIndicationTicket,
+    TLS_Ext_PSKKeyExchangeModes,
+    TLS_Ext_RenegotiationInfo,
+    TLS_Ext_SignatureAlgorithms,
+    TLS_Ext_SupportedGroups,
+    TLS_Ext_SupportedVersion_SH,
+)
+from scapy.layers.tls.keyexchange import _tls_hash_sig
+from scapy.layers.tls.keyexchange_tls13 import (
+    TLS_Ext_KeyShare_SH,
+    KeyShareEntry,
+    TLS_Ext_KeyShare_HRR,
+    TLS_Ext_PreSharedKey_CH,
+    TLS_Ext_PreSharedKey_SH,
+    get_usable_tls13_sigalgs,
+)
 from scapy.layers.tls.handshake import TLSCertificate, TLSCertificateRequest, \
     TLSCertificateVerify, TLSClientHello, TLSClientKeyExchange, TLSFinished, \
     TLSServerHello, TLSServerHelloDone, TLSServerKeyExchange, \
@@ -54,8 +66,17 @@ from scapy.layers.tls.record import TLSAlert, TLSChangeCipherSpec, \
     TLSApplicationData
 from scapy.layers.tls.record_tls13 import TLS13
 from scapy.layers.tls.crypto.hkdf import TLS13_HKDF
-from scapy.layers.tls.crypto.suites import _tls_cipher_suites_cls, \
-    get_usable_ciphersuites
+from scapy.layers.tls.crypto.suites import (
+    _tls_cipher_suites_cls,
+    _tls_cipher_suites,
+    get_usable_ciphersuites,
+)
+
+# Typing imports
+from typing import (
+    Optional,
+    Union,
+)
 
 if conf.crypto_valid:
     from cryptography.hazmat.backends import default_backend
@@ -65,7 +86,8 @@ if conf.crypto_valid:
 class TLSServerAutomaton(_TLSAutomaton):
     """
     A simple TLS test server automaton. Try to overload some states or
-    conditions and see what happens on the other side.
+    conditions and see what happens on the other side. This server
+    can only serve a SINGLE CLIENT at a time.
 
     Because of socket and automaton limitations, for now, the best way to
     interrupt the server is by sending him 'stop_server'. Interruptions with
@@ -75,20 +97,23 @@ class TLSServerAutomaton(_TLSAutomaton):
     message in a SSLv2 version, he will close the client session with a
     similar message, and start waiting for new client connections.
 
-    _'mycert' and 'mykey' may be provided as filenames. They are needed for any
-    server authenticated handshake.
-    _'preferred_ciphersuite' allows the automaton to choose a cipher suite when
-    offered in the ClientHello. If absent, another one will be chosen.
-    _'client_auth' means the client has to provide a certificate.
-    _'is_echo_server' means that everything received will be sent back.
-    _'max_client_idle_time' is the maximum silence duration from the client.
-    Once this limit has been reached, the client (if still here) is dropped,
-    and we wait for a new connection.
+    :param mycert: the Cert or path to certificate
+    :param mykey: the PrivKey or path to private key
+    :param preferred_ciphersuite: a ciphersuite to prefer in the client hello
+    :param client_auth: whether the client has to provide a certificate
+
+    Server behavior:
+
+    :param is_echo_server: means that everything received will be sent back
+    :param max_client_idle_time: is the maximum silence duration from the client.
+        Once this limit has been reached, the client (if still here) is dropped,
+        and we wait for a new connection.
     """
 
     def parse_args(self, server="127.0.0.1", sport=4433,
                    mycert=None, mykey=None,
-                   preferred_ciphersuite=None,
+                   preferred_ciphersuite: Optional[int] = None,
+                   preferred_signature_algorithm: Union[str, int, None] = None,
                    client_auth=False,
                    is_echo_server=True,
                    max_client_idle_time=60,
@@ -119,36 +144,65 @@ class TLSServerAutomaton(_TLSAutomaton):
         self.remote_ip = None
         self.remote_port = None
 
-        self.preferred_ciphersuite = preferred_ciphersuite
         self.client_auth = client_auth
         self.is_echo_server = is_echo_server
         self.max_client_idle_time = max_client_idle_time
         self.curve = None
+        self.preferred_ciphersuite = None
+        self.preferred_signature_algorithm = None
         self.cookie = cookie
         self.psk_secret = psk
         self.psk_mode = psk_mode
+
         if handle_session_ticket is None:
             handle_session_ticket = session_ticket_file is not None
         if handle_session_ticket:
             session_ticket_file = session_ticket_file or get_temp_file()
         self.handle_session_ticket = handle_session_ticket
         self.session_ticket_file = session_ticket_file
-        for (group_id, ng) in _tls_named_groups.items():
-            if ng == curve:
-                self.curve = group_id
+
+        if preferred_ciphersuite is not None:
+            if preferred_ciphersuite in _tls_cipher_suites:
+                self.preferred_ciphersuite = preferred_ciphersuite
+            else:
+                self.vprint("Unrecognized cipher suite.")
+
+        if preferred_signature_algorithm is not None:
+            if preferred_signature_algorithm in _tls_hash_sig:
+                self.preferred_signature_algorithm = preferred_signature_algorithm
+            else:
+                for (sig_id, nc) in _tls_hash_sig.items():
+                    if nc == preferred_signature_algorithm:
+                        self.preferred_signature_algorithm = sig_id
+                        break
+                else:
+                    self.vprint("Unrecognized signature algorithm.")
+
+        if curve:
+            for (group_id, ng) in _tls_named_groups.items():
+                if ng == curve:
+                    self.curve = group_id
+                    break
+            else:
+                self.vprint("Unrecognized curve.")
 
     def vprint_sessioninfo(self):
         if self.verbose:
             s = self.cur_session
             v = _tls_version[s.tls_version]
-            self.vprint("Version       : %s" % v)
+            self.vprint("Version            : %s" % v)
             cs = s.wcs.ciphersuite.name
-            self.vprint("Cipher suite  : %s" % cs)
+            self.vprint("Cipher suite       : %s" % cs)
+            kx_groupname = s.kx_group
+            self.vprint("Server temp key    : %s" % kx_groupname)
+            if s.tls_version >= 0x0304:
+                sigalg = _tls_hash_sig[s.selected_sig_alg]
+                self.vprint("Negotiated sig_alg : %s" % sigalg)
             if s.tls_version < 0x0304:
                 ms = s.master_secret
             else:
                 ms = s.tls13_master_secret
-            self.vprint("Master secret : %s" % repr_hex(ms))
+            self.vprint("Master secret      : %s" % repr_hex(ms))
             if s.client_certs:
                 self.vprint("Client certificate chain: %r" % s.client_certs)
 
@@ -181,6 +235,26 @@ class TLSServerAutomaton(_TLSAutomaton):
         answer = (header + body) % len(body)
         return answer
 
+    def stop(self, wait=True):
+        # We shutdown the server socket so that WAITING_CLIENT exits.
+        try:
+            self.serversocket.shutdown(socket.SHUT_RDWR)
+            self.serversocket.close()
+        except OSError:
+            pass
+        self.serversocket.close()
+        return super(TLSServerAutomaton, self).stop(wait=wait)
+
+    def forcestop(self, wait=True):
+        # We shutdown the server socket so that WAITING_CLIENT exits.
+        try:
+            self.serversocket.shutdown(socket.SHUT_RDWR)
+            self.serversocket.close()
+        except OSError:
+            pass
+        self.serversocket.close()
+        return super(TLSServerAutomaton, self).forcestop(wait=wait)
+
     @ATMT.state(initial=True)
     def INITIAL(self):
         self.vprint("Starting TLS server automaton.")
@@ -206,11 +280,12 @@ class TLSServerAutomaton(_TLSAutomaton):
             self.vprint(m)
             self.vprint("Maybe some server is already listening there?")
             self.vprint()
-            raise self.FINAL()
+            raise self.FINAL(reason=self.BIND)
         raise self.WAITING_CLIENT()
 
     @ATMT.state()
     def SOCKET_CLOSED(self):
+        self.socket.close()
         raise self.WAITING_CLIENT()
 
     @ATMT.state()
@@ -220,7 +295,11 @@ class TLSServerAutomaton(_TLSAutomaton):
         self.vprint()
         self.vprint("Waiting for a new client on %s:%d" % (self.local_ip,
                                                            self.local_port))
-        self.socket, addr = self.serversocket.accept()
+        try:
+            self.socket, addr = self.serversocket.accept()
+        except OSError:
+            self.vprint("Wait was cancelled: server socket was closed.")
+            raise self.FINAL()
         if not isinstance(addr, tuple):
             addr = self.socket.getpeername()
         if len(addr) > 2:
@@ -239,7 +318,7 @@ class TLSServerAutomaton(_TLSAutomaton):
         every server_key with both server_rsa_key and server_ecdsa_key.
         """
         self.cur_session = tlsSession(connection_end="server")
-        self.cur_session.server_certs = [self.mycert]
+        self.cur_session.server_certs = CertList([self.mycert])
         self.cur_session.server_key = self.mykey
         if isinstance(self.mykey, PrivKeyRSA):
             self.cur_session.server_rsa_key = self.mykey
@@ -262,11 +341,21 @@ class TLSServerAutomaton(_TLSAutomaton):
     def tls13_should_handle_ClientHello(self):
         self.raise_on_packet(TLS13ClientHello,
                              self.tls13_HANDLED_CLIENTHELLO)
+        if self.cur_session.advertised_tls_version == 0x0304:
+            self.raise_on_packet(TLSClientHello,
+                                 self.tls13_HANDLED_CLIENTHELLO)
 
     @ATMT.condition(RECEIVED_CLIENTFLIGHT1, prio=2)
     def should_handle_ClientHello(self):
         self.raise_on_packet(TLSClientHello,
                              self.HANDLED_CLIENTHELLO)
+
+    @ATMT.condition(RECEIVED_CLIENTFLIGHT1, prio=3)
+    def tls13_should_handle_ChangeCipherSpec_after_tls13_retry(self):
+        # Middlebox compatibility mode after a HelloRetryRequest.
+        if self.cur_session.tls13_retry:
+            self.raise_on_packet(TLSChangeCipherSpec,
+                                 self.RECEIVED_CLIENTFLIGHT1)
 
     @ATMT.state()
     def HANDLED_CLIENTHELLO(self):
@@ -277,6 +366,8 @@ class TLSServerAutomaton(_TLSAutomaton):
             kx = "RSA"
         elif isinstance(self.mykey, PrivKeyECDSA):
             kx = "ECDSA"
+        elif isinstance(self.mykey, PrivKeyEdDSA):
+            kx = ""
         if get_usable_ciphersuites(self.cur_pkt.ciphers, kx):
             raise self.PREPARE_SERVERFLIGHT1()
         raise self.NO_USABLE_CIPHERSUITE()
@@ -304,18 +395,22 @@ class TLSServerAutomaton(_TLSAutomaton):
         """
         Selecting a cipher suite should be no trouble as we already caught
         the None case previously.
-
-        Also, we do not manage extensions at all.
         """
         if isinstance(self.mykey, PrivKeyRSA):
             kx = "RSA"
         elif isinstance(self.mykey, PrivKeyECDSA):
             kx = "ECDSA"
+        elif isinstance(self.mykey, PrivKeyEdDSA):
+            kx = ""
         usable_suites = get_usable_ciphersuites(self.cur_pkt.ciphers, kx)
         c = usable_suites[0]
         if self.preferred_ciphersuite in usable_suites:
             c = self.preferred_ciphersuite
-        self.add_msg(TLSServerHello(cipher=c))
+
+        # Some extensions
+        ext = [TLS_Ext_RenegotiationInfo()]
+
+        self.add_msg(TLSServerHello(cipher=c, ext=ext))
         raise self.ADDED_SERVERHELLO()
 
     @ATMT.state()
@@ -445,7 +540,17 @@ class TLSServerAutomaton(_TLSAutomaton):
 
     @ATMT.state()
     def HANDLED_CERTIFICATEVERIFY(self):
-        pass
+        if self.client_auth and not self.cur_session.client_cert_verify_valid:
+            raise self.INVALID_CERTIFICATEVERIFY()
+
+    @ATMT.state()
+    def INVALID_CERTIFICATEVERIFY(self):
+        self.vprint("Invalid CertificateVerify!")
+        self.add_record()
+        self.add_msg(TLSAlert(level=2, descr=51))
+        self.flush_records()
+        self.socket.close()
+        raise self.WAITING_CLIENT()
 
     @ATMT.condition(HANDLED_CERTIFICATEVERIFY, prio=1)
     def should_handle_ChangeCipherSpec(self):
@@ -483,7 +588,18 @@ class TLSServerAutomaton(_TLSAutomaton):
 
     @ATMT.state()
     def HANDLED_CLIENTFINISHED(self):
+        if not self.cur_session.finished_valid:
+            raise self.INVALID_FINISHED()
         raise self.PREPARE_SERVERFLIGHT2()
+
+    @ATMT.state()
+    def INVALID_FINISHED(self):
+        self.vprint("Invalid Finished!")
+        self.add_record()
+        self.add_msg(TLSAlert(level=2, descr=51))
+        self.flush_records()
+        self.socket.close()
+        raise self.WAITING_CLIENT()
 
     @ATMT.condition(HANDLED_CHANGECIPHERSPEC, prio=2)
     def should_handle_Alert_from_ClientFinished(self):
@@ -563,6 +679,12 @@ class TLSServerAutomaton(_TLSAutomaton):
                         if self.curve in e.groups:
                             # Here, we need to send an HelloRetryRequest
                             raise self.tls13_PREPARE_HELLORETRYREQUEST()
+
+        # Signature Algorithms extension is mandatory
+        if not s.advertised_sig_algs:
+            self.vprint("Missing signature_algorithms extension in ClientHello!")
+            raise self.CLOSE_NOTIFY()
+
         raise self.tls13_PREPARE_SERVERFLIGHT1()
 
     @ATMT.state()
@@ -576,6 +698,8 @@ class TLSServerAutomaton(_TLSAutomaton):
             kx = "RSA"
         elif isinstance(self.mykey, PrivKeyECDSA):
             kx = "ECDSA"
+        elif isinstance(self.mykey, PrivKeyEdDSA):
+            kx = ""
         usable_suites = get_usable_ciphersuites(self.cur_pkt.ciphers, kx)
         c = usable_suites[0]
         ext = [TLS_Ext_SupportedVersion_SH(version="TLS 1.3"),
@@ -700,6 +824,9 @@ class TLSServerAutomaton(_TLSAutomaton):
             if isinstance(m, (TLS13ClientHello, TLSClientHello)):
                 for e in m.ext:
                     if isinstance(e, TLS_Ext_PreSharedKey_CH):
+                        if not e.identities or len(e.identities) != len(e.binders):
+                            self.vprint("Malformed pre_shared_key extension!")
+                            raise self.CLOSE_NOTIFY()
                         psk_identity = e.identities[0].identity
                         obfuscated_age = e.identities[0].obfuscated_ticket_age
                         binder = e.binders[0].binder
@@ -716,6 +843,8 @@ class TLSServerAutomaton(_TLSAutomaton):
             kx = "RSA"
         elif isinstance(self.mykey, PrivKeyECDSA):
             kx = "ECDSA"
+        elif isinstance(self.mykey, PrivKeyEdDSA):
+            kx = ""
         usable_suites = get_usable_ciphersuites(self.cur_pkt.ciphers, kx)
         c = usable_suites[0]
         group = next(iter(self.cur_session.tls13_client_pubshares))
@@ -813,6 +942,22 @@ class TLSServerAutomaton(_TLSAutomaton):
     @ATMT.condition(tls13_ADDED_CERTIFICATE)
     def tls13_should_add_CertificateVerifiy(self):
         if not self.cur_session.tls13_psk_secret:
+            # If we have a preferred signature algorithm, and the client supports
+            # it, use that.
+            if self.cur_session.advertised_sig_algs:
+                usable_sigalgs = get_usable_tls13_sigalgs(
+                    self.cur_session.advertised_sig_algs,
+                    self.mykey,
+                    location="certificateverify",
+                )
+                if not usable_sigalgs:
+                    self.vprint("No usable signature algorithm!")
+                    raise self.CLOSE_NOTIFY()
+                pref_alg = self.preferred_signature_algorithm
+                if pref_alg in usable_sigalgs:
+                    self.cur_session.selected_sig_alg = pref_alg
+                else:
+                    self.cur_session.selected_sig_alg = usable_sigalgs[0]
             self.add_msg(TLSCertificateVerify())
         raise self.tls13_ADDED_CERTIFICATEVERIFY()
 
@@ -904,7 +1049,8 @@ class TLSServerAutomaton(_TLSAutomaton):
 
     @ATMT.state()
     def TLS13_HANDLED_CLIENT_CERTIFICATEVERIFY(self):
-        pass
+        if self.client_auth and not self.cur_session.client_cert_verify_valid:
+            raise self.INVALID_CERTIFICATEVERIFY()
 
     @ATMT.condition(TLS13_HANDLED_CLIENT_CERTIFICATEVERIFY)
     def tls13_should_handle_ClientFinished(self):
@@ -923,6 +1069,8 @@ class TLSServerAutomaton(_TLSAutomaton):
 
     @ATMT.state()
     def TLS13_HANDLED_CLIENTFINISHED(self):
+        if not self.cur_session.finished_valid:
+            raise self.INVALID_FINISHED()
         self.vprint("TLS handshake completed!")
         self.vprint_sessioninfo()
         if self.is_echo_server:
@@ -1088,7 +1236,7 @@ class TLSServerAutomaton(_TLSAutomaton):
         # We might call shutdown, but unit tests with s_client fail with this
         # self.socket.shutdown(1)
         self.socket.close()
-        raise self.FINAL()
+        raise self.FINAL(reason=self.CLOSE_NOTIFY_FINAL)
 
     #                          SSLv2 handshake                                #
 
@@ -1165,12 +1313,12 @@ class TLSServerAutomaton(_TLSAutomaton):
 
     @ATMT.state()
     def SSLv2_HANDLED_CLIENTFINISHED(self):
-        pass
+        if not self.cur_session.finished_valid:
+            raise self.INVALID_FINISHED()
 
     @ATMT.condition(SSLv2_HANDLED_CLIENTFINISHED, prio=1)
     def sslv2_should_add_ServerVerify_from_ClientFinished(self):
-        hs_msg = [type(m) for m in self.cur_session.handshake_messages_parsed]
-        if SSLv2ServerVerify in hs_msg:
+        if self.in_handshake(SSLv2ServerVerify):
             return
         self.add_record(is_sslv2=True)
         p = SSLv2ServerVerify(challenge=self.cur_session.sslv2_challenge)
@@ -1179,8 +1327,7 @@ class TLSServerAutomaton(_TLSAutomaton):
 
     @ATMT.condition(SSLv2_RECEIVED_CLIENTFINISHED, prio=2)
     def sslv2_should_add_ServerVerify_from_NoClientFinished(self):
-        hs_msg = [type(m) for m in self.cur_session.handshake_messages_parsed]
-        if SSLv2ServerVerify in hs_msg:
+        if self.in_handshake(SSLv2ServerVerify):
             return
         self.add_record(is_sslv2=True)
         p = SSLv2ServerVerify(challenge=self.cur_session.sslv2_challenge)
@@ -1207,8 +1354,7 @@ class TLSServerAutomaton(_TLSAutomaton):
 
     @ATMT.state()
     def SSLv2_SENT_SERVERVERIFY(self):
-        hs_msg = [type(m) for m in self.cur_session.handshake_messages_parsed]
-        if SSLv2ClientFinished in hs_msg:
+        if self.in_handshake(SSLv2ClientFinished):
             raise self.SSLv2_HANDLED_CLIENTFINISHED()
         else:
             raise self.SSLv2_RECEIVED_CLIENTFINISHED()
@@ -1217,8 +1363,7 @@ class TLSServerAutomaton(_TLSAutomaton):
 
     @ATMT.condition(SSLv2_HANDLED_CLIENTFINISHED, prio=2)
     def sslv2_should_add_RequestCertificate(self):
-        hs_msg = [type(m) for m in self.cur_session.handshake_messages_parsed]
-        if not self.client_auth or SSLv2RequestCertificate in hs_msg:
+        if not self.client_auth or self.in_handshake(SSLv2RequestCertificate):
             return
         self.add_record(is_sslv2=True)
         self.add_msg(SSLv2RequestCertificate(challenge=randstring(16)))
@@ -1263,6 +1408,8 @@ class TLSServerAutomaton(_TLSAutomaton):
     @ATMT.state()
     def SSLv2_HANDLED_CLIENTCERTIFICATE(self):
         self.vprint("Received client certificate...")
+        if self.client_auth and not self.cur_session.client_cert_verify_valid:
+            raise self.INVALID_CERTIFICATEVERIFY()
         # We could care about the client CA, but we don't.
         raise self.SSLv2_HANDLED_CLIENTFINISHED()
 
@@ -1391,10 +1538,12 @@ class TLSServerAutomaton(_TLSAutomaton):
         except Exception:
             self.vprint("Could not send our goodbye. The client probably left.")  # noqa: E501
         self.socket.close()
-        raise self.FINAL()
+        raise self.FINAL(reason=self.SSLv2_CLOSE_NOTIFY_FINAL)
 
     @ATMT.state(stop=True, final=True)
-    def FINAL(self):
+    def FINAL(self, reason=None):
         self.vprint("Closing server socket...")
         self.serversocket.close()
+        if reason is not None:
+            self.final_reason = reason
         self.vprint("Ending TLS server automaton.")

@@ -1,8 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # This file is part of Scapy
-# See http://www.secdev.org/projects/scapy for more information
+# See https://scapy.net/ for more information
 # Copyright (C) Philippe Biondi <phil@secdev.org>
-# This program is published under a GPLv2 license
-
 # Copyright (C) 2005  Guillaume Valadon <guedou@hongo.wide.ad.jp>
 #                     Arnaud Ebalard <arnaud.ebalard@eads.net>
 
@@ -14,10 +13,9 @@ Routing and network interface handling for IPv6.
 #                        Routing/Interfaces stuff                           #
 #############################################################################
 
-from __future__ import absolute_import
 import socket
 from scapy.config import conf
-from scapy.interfaces import resolve_iface
+from scapy.interfaces import resolve_iface, NetworkInterface
 from scapy.utils6 import in6_ptop, in6_cidr2mask, in6_and, \
     in6_islladdr, in6_ismlladdr, in6_isincluded, in6_isgladdr, \
     in6_isaddr6to4, in6_ismaddr, construct_source_candidate_set, \
@@ -27,7 +25,7 @@ from scapy.pton_ntop import inet_pton, inet_ntop
 from scapy.error import warning, log_loading
 from scapy.utils import pretty_list
 
-from scapy.compat import (
+from typing import (
     Any,
     Dict,
     List,
@@ -42,8 +40,11 @@ class Route6:
 
     def __init__(self):
         # type: () -> None
-        self.resync()
+        self.routes = []  # type: List[Tuple[str, int, str, str, List[str], int]]  # noqa: E501
+        self.ipv6_ifaces = set()  # type: Set[Union[str, NetworkInterface]]
         self.invalidate_cache()
+        if conf.route6_autoload:
+            self.resync()
 
     def invalidate_cache(self):
         # type: () -> None
@@ -52,8 +53,8 @@ class Route6:
     def flush(self):
         # type: () -> None
         self.invalidate_cache()
-        self.ipv6_ifaces = set()  # type: Set[str]
-        self.routes = []  # type: List[Tuple[str, int, str, str, List[str], int]]  # noqa: E501
+        self.routes.clear()
+        self.ipv6_ifaces.clear()
 
     def resync(self):
         # type: () -> None
@@ -104,7 +105,7 @@ class Route6:
             ifaddr = [ifaddr_uniq]
         else:
             lifaddr = in6_getifaddr()
-            devaddrs = [x for x in lifaddr if x[2] == dev]
+            devaddrs = (x for x in lifaddr if x[2] == dev)
             ifaddr = construct_source_candidate_set(prefix, plen, devaddrs)
 
         self.ipv6_ifaces.add(dev)
@@ -129,10 +130,7 @@ class Route6:
         """
 
         if not all(r[3] == iface for r in conf.route6.routes):
-            try:
-                self.ipv6_ifaces.remove(iface)
-            except KeyError:
-                pass
+            self.ipv6_ifaces.discard(iface)
 
     def delt(self, dst, gw=None):
         # type: (str, Optional[str]) -> None
@@ -158,7 +156,7 @@ class Route6:
             i = self.routes.index(to_del[0])
             self.invalidate_cache()
             self.remove_ipv6_iface(self.routes[i][3])
-            del(self.routes[i])
+            del self.routes[i]
 
     def ifchange(self, iff, addr):
         # type: (str, str) -> None
@@ -219,7 +217,7 @@ class Route6:
         self.ipv6_ifaces.add(iff)
 
     def route(self, dst="", dev=None, verbose=conf.verb):
-        # type: (str, Optional[Any], int) -> Tuple[str, str, str]
+        # type: (str, Optional[str], int) -> Tuple[str, str, str]
         """
         Provide best route to IPv6 destination address, based on Scapy
         internal routing table content.
@@ -251,35 +249,6 @@ class Route6:
             dst = socket.getaddrinfo(savedst, None, socket.AF_INET6)[0][-1][0]
             # TODO : Check if name resolution went well
 
-        # Choose a valid IPv6 interface while dealing with link-local addresses
-        if dev is None and (in6_islladdr(dst) or in6_ismlladdr(dst)):
-            dev = conf.iface  # default interface
-
-            # Check if the default interface supports IPv6!
-            if dev not in self.ipv6_ifaces and self.ipv6_ifaces:
-
-                tmp_routes = [route for route in self.routes
-                              if route[3] != conf.iface]
-
-                default_routes = [route for route in tmp_routes
-                                  if (route[0], route[1]) == ("::", 0)]
-
-                ll_routes = [route for route in tmp_routes
-                             if (route[0], route[1]) == ("fe80::", 64)]
-
-                if default_routes:
-                    # Fallback #1 - the first IPv6 default route
-                    dev = default_routes[0][3]
-                elif ll_routes:
-                    # Fallback #2 - the first link-local prefix
-                    dev = ll_routes[0][3]
-                else:
-                    # Fallback #3 - the loopback
-                    dev = conf.loopback_name
-
-                warning("The conf.iface interface (%s) does not support IPv6! "
-                        "Using %s instead for routing!" % (conf.iface, dev))
-
         # Deal with dev-specific request for cache search
         k = dst
         if dev is not None:
@@ -308,7 +277,7 @@ class Route6:
                 if verbose:
                     warning("No route found for IPv6 destination %s "
                             "(no default route?)", dst)
-                return (conf.loopback_name, "::", "::")
+                return (dev or conf.loopback_name, "::", "::")
 
         # Sort with longest prefix first then use metrics as a tie-breaker
         paths.sort(key=lambda x: (-x[0], x[1]))

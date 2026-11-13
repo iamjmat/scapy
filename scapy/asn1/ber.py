@@ -1,22 +1,48 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # This file is part of Scapy
-# See http://www.secdev.org/projects/scapy for more information
+# See https://scapy.net/ for more information
 # Copyright (C) Philippe Biondi <phil@secdev.org>
-# Modified by Maxence Tury <maxence.tury@ssi.gouv.fr>
+# Acknowledgment: Maxence Tury <maxence.tury@ssi.gouv.fr>
 # Acknowledgment: Ralph Broenink
-# This program is published under a GPLv2 license
 
 """
 Basic Encoding Rules (BER) for ASN.1
 """
 
-from __future__ import absolute_import
+# Good read: https://luca.ntop.org/Teaching/Appunti/asn1.html
+
+from scapy.config import conf
 from scapy.error import warning
-from scapy.compat import chb, orb, bytes_encode
+from scapy.compat import chb, bytes_encode
 from scapy.utils import binrepr, inet_aton, inet_ntoa
-from scapy.asn1.asn1 import ASN1_Decoding_Error, ASN1_Encoding_Error, \
-    ASN1_BadTag_Decoding_Error, ASN1_Codecs, ASN1_Class_UNIVERSAL, \
-    ASN1_Error, ASN1_DECODING_ERROR, ASN1_BADTAG
-from scapy.modules import six
+from scapy.asn1.asn1 import (
+    ASN1Tag,
+    ASN1_BADTAG,
+    ASN1_BadTag_Decoding_Error,
+    ASN1_Class,
+    ASN1_Class_UNIVERSAL,
+    ASN1_Codecs,
+    ASN1_DECODING_ERROR,
+    ASN1_Decoding_Error,
+    ASN1_Encoding_Error,
+    ASN1_Error,
+    ASN1_Object,
+    _ASN1_ERROR,
+)
+
+from typing import (
+    Any,
+    AnyStr,
+    Dict,
+    Generic,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+    cast,
+)
 
 ##################
 #  BER encoding  #
@@ -25,20 +51,28 @@ from scapy.modules import six
 
 #    [ BER tools ]    #
 
+MAX_BER_DEPTH = 32
+
 
 class BER_Exception(Exception):
     pass
 
 
 class BER_Encoding_Error(ASN1_Encoding_Error):
-    def __init__(self, msg, encoded=None, remaining=None):
+    def __init__(self,
+                 msg,  # type: str
+                 encoded=None,  # type: Optional[Union[BERcodec_Object[Any], str]]  # noqa: E501
+                 remaining=b""  # type: bytes
+                 ):
+        # type: (...) -> None
         Exception.__init__(self, msg)
         self.remaining = remaining
         self.encoded = encoded
 
     def __str__(self):
+        # type: () -> str
         s = Exception.__str__(self)
-        if isinstance(self.encoded, BERcodec_Object):
+        if isinstance(self.encoded, ASN1_Object):
             s += "\n### Already encoded ###\n%s" % self.encoded.strshow()
         else:
             s += "\n### Already encoded ###\n%r" % self.encoded
@@ -47,14 +81,20 @@ class BER_Encoding_Error(ASN1_Encoding_Error):
 
 
 class BER_Decoding_Error(ASN1_Decoding_Error):
-    def __init__(self, msg, decoded=None, remaining=None):
+    def __init__(self,
+                 msg,  # type: str
+                 decoded=None,  # type: Optional[Any]
+                 remaining=b""  # type: bytes
+                 ):
+        # type: (...) -> None
         Exception.__init__(self, msg)
         self.remaining = remaining
         self.decoded = decoded
 
     def __str__(self):
+        # type: () -> str
         s = Exception.__str__(self)
-        if isinstance(self.decoded, BERcodec_Object):
+        if isinstance(self.decoded, ASN1_Object):
             s += "\n### Already decoded ###\n%s" % self.decoded.strshow()
         else:
             s += "\n### Already decoded ###\n%r" % self.decoded
@@ -68,6 +108,10 @@ class BER_BadTag_Decoding_Error(BER_Decoding_Error,
 
 
 def BER_len_enc(ll, size=0):
+    # type: (int, Optional[int]) -> bytes
+    from scapy.config import conf
+    if size is None:
+        size = conf.ASN1_default_long_size
     if ll <= 127 and size == 0:
         return chb(ll)
     s = b""
@@ -84,7 +128,8 @@ def BER_len_enc(ll, size=0):
 
 
 def BER_len_dec(s):
-    tmp_len = orb(s[0])
+    # type: (bytes) -> Tuple[int, bytes]
+    tmp_len = s[0]
     if not tmp_len & 0x80:
         return tmp_len, s[1:]
     tmp_len &= 0x7f
@@ -97,12 +142,13 @@ def BER_len_dec(s):
     ll = 0
     for c in s[1:tmp_len + 1]:
         ll <<= 8
-        ll |= orb(c)
+        ll |= c
     return ll, s[tmp_len + 1:]
 
 
 def BER_num_enc(ll, size=1):
-    x = []
+    # type: (int, int) -> bytes
+    x = []  # type: List[int]
     while ll or size > 0:
         x.insert(0, ll & 0x7f)
         if len(x) > 1:
@@ -112,16 +158,20 @@ def BER_num_enc(ll, size=1):
     return b"".join(chb(k) for k in x)
 
 
-def BER_num_dec(s, cls_id=0):
+def BER_num_dec(s, cls_id=0, max_pow=32):
+    # type: (bytes, int, int) -> Tuple[int, bytes]
     if len(s) == 0:
         raise BER_Decoding_Error("BER_num_dec: got empty string", remaining=s)
     x = cls_id
     for i, c in enumerate(s):
-        c = orb(c)
+        c = c
         x <<= 7
         x |= c & 0x7f
         if not c & 0x80:
             break
+        if i > max_pow:
+            raise BER_Decoding_Error("BER_num_dec: maximum value reached (2^32-1)",
+                                     remaining=s)
     if c & 0x80:
         raise BER_Decoding_Error("BER_num_dec: unfinished number description",
                                  remaining=s)
@@ -129,6 +179,7 @@ def BER_num_dec(s, cls_id=0):
 
 
 def BER_id_dec(s):
+    # type: (bytes) -> Tuple[int, bytes]
     # This returns the tag ALONG WITH THE PADDED CLASS+CONSTRUCTIVE INFO.
     # Let's recall that bits 8-7 from the first byte of the tag encode
     # the class information, while bit 6 means primitive or constructive.
@@ -145,7 +196,7 @@ def BER_id_dec(s):
     # encoded in scapy's tag in order to reuse it for packet building.
     # Note that tags thus may have to be hard-coded with their extended
     # information, e.g. a SEQUENCE from asn1.py has a direct tag 0x20|16.
-    x = orb(s[0])
+    x = s[0]
     if x & 0x1f != 0x1f:
         # low-tag-number
         return x, s[1:]
@@ -155,13 +206,14 @@ def BER_id_dec(s):
 
 
 def BER_id_enc(n):
+    # type: (int) -> bytes
     if n < 256:
         # low-tag-number
         return chb(n)
     else:
         # high-tag-number
         s = BER_num_enc(n)
-        tag = orb(s[0])             # first byte, as an int
+        tag = s[0]                  # first byte, as an int
         tag &= 0x07                 # reset every bit from 8 to 4
         tag <<= 5                   # move back the info bits on top
         tag |= 0x1f                 # pad with 1s every bit from 5 to 1
@@ -170,25 +222,39 @@ def BER_id_enc(n):
 # The functions below provide implicit and explicit tagging support.
 
 
-def BER_tagging_dec(s, hidden_tag=None, implicit_tag=None,
-                    explicit_tag=None, safe=False):
+def BER_tagging_dec(s,  # type: bytes
+                    hidden_tag=None,  # type: Optional[int | ASN1Tag]
+                    implicit_tag=None,  # type: Optional[int]
+                    explicit_tag=None,  # type: Optional[int]
+                    safe=False,  # type: Optional[bool]
+                    _fname="",  # type: str
+                    ):
+    # type: (...) -> Tuple[Optional[int], bytes]
     # We output the 'real_tag' if it is different from the (im|ex)plicit_tag.
+    # 'hidden_tag' is the type tag that is implicited when 'implicit_tag' is used.
     real_tag = None
     if len(s) > 0:
-        err_msg = "BER_tagging_dec: observed tag does not match expected tag"
+        err_msg = (
+            "BER_tagging_dec: observed tag 0x%.02x does not "
+            "match expected tag 0x%.02x (%s)"
+        )
         if implicit_tag is not None:
             ber_id, s = BER_id_dec(s)
             if ber_id != implicit_tag:
-                if not safe:
-                    raise BER_Decoding_Error(err_msg, remaining=s)
+                if not safe and ber_id != implicit_tag:
+                    raise BER_Decoding_Error(err_msg % (
+                        ber_id, implicit_tag, _fname),
+                        remaining=s)
                 else:
                     real_tag = ber_id
-            s = chb(hash(hidden_tag)) + s
+            s = chb(int(hidden_tag)) + s  # type: ignore
         elif explicit_tag is not None:
             ber_id, s = BER_id_dec(s)
             if ber_id != explicit_tag:
                 if not safe:
-                    raise BER_Decoding_Error(err_msg, remaining=s)
+                    raise BER_Decoding_Error(
+                        err_msg % (ber_id, explicit_tag, _fname),
+                        remaining=s)
                 else:
                     real_tag = ber_id
             l, s = BER_len_dec(s)
@@ -196,19 +262,28 @@ def BER_tagging_dec(s, hidden_tag=None, implicit_tag=None,
 
 
 def BER_tagging_enc(s, implicit_tag=None, explicit_tag=None):
+    # type: (bytes, Optional[int], Optional[int]) -> bytes
     if len(s) > 0:
         if implicit_tag is not None:
             s = BER_id_enc(implicit_tag) + s[1:]
         elif explicit_tag is not None:
-            s = BER_id_enc(explicit_tag) + BER_len_enc(len(s)) + s
+            s = BER_id_enc(explicit_tag) + BER_len_enc(
+                len(s), size=conf.ASN1_default_long_size,
+            ) + s
     return s
 
 #    [ BER classes ]    #
 
 
 class BERcodec_metaclass(type):
-    def __new__(cls, name, bases, dct):
-        c = super(BERcodec_metaclass, cls).__new__(cls, name, bases, dct)
+    def __new__(cls,
+                name,  # type: str
+                bases,  # type: Tuple[type, ...]
+                dct  # type: Dict[str, Any]
+                ):
+        # type: (...) -> Type[BERcodec_Object[Any]]
+        c = cast('Type[BERcodec_Object[Any]]',
+                 super(BERcodec_metaclass, cls).__new__(cls, name, bases, dct))
         try:
             c.tag.register(c.codec, c)
         except Exception:
@@ -216,16 +291,21 @@ class BERcodec_metaclass(type):
         return c
 
 
-class BERcodec_Object(six.with_metaclass(BERcodec_metaclass)):
+_K = TypeVar('_K')
+
+
+class BERcodec_Object(Generic[_K], metaclass=BERcodec_metaclass):
     codec = ASN1_Codecs.BER
     tag = ASN1_Class_UNIVERSAL.ANY
 
     @classmethod
     def asn1_object(cls, val):
+        # type: (_K) -> ASN1_Object[_K]
         return cls.tag.asn1_object(val)
 
     @classmethod
     def check_string(cls, s):
+        # type: (bytes) -> None
         if not s:
             raise BER_Decoding_Error(
                 "%s: Got empty object while expecting tag %r" %
@@ -234,6 +314,7 @@ class BERcodec_Object(six.with_metaclass(BERcodec_metaclass)):
 
     @classmethod
     def check_type(cls, s):
+        # type: (bytes) -> bytes
         cls.check_string(s)
         tag, remainder = BER_id_dec(s)
         if not isinstance(tag, int) or cls.tag != tag:
@@ -245,6 +326,7 @@ class BERcodec_Object(six.with_metaclass(BERcodec_metaclass)):
 
     @classmethod
     def check_type_get_len(cls, s):
+        # type: (bytes) -> Tuple[int, bytes]
         s2 = cls.check_type(s)
         if not s2:
             raise BER_Decoding_Error("%s: No bytes while expecting a length" %
@@ -253,6 +335,7 @@ class BERcodec_Object(six.with_metaclass(BERcodec_metaclass)):
 
     @classmethod
     def check_type_check_len(cls, s):
+        # type: (bytes) -> Tuple[int, bytes, bytes]
         l, s3 = cls.check_type_get_len(s)
         if len(s3) < l:
             raise BER_Decoding_Error("%s: Got %i bytes while expecting %i" %
@@ -260,113 +343,157 @@ class BERcodec_Object(six.with_metaclass(BERcodec_metaclass)):
         return l, s3[:l], s3[l:]
 
     @classmethod
-    def do_dec(cls, s, context=None, safe=False):
-        if context is None:
-            context = cls.tag.context
+    def do_dec(cls,
+               s,  # type: bytes
+               context=None,  # type: Optional[Type[ASN1_Class]]
+               safe=False,  # type: bool
+               _depth=0,  # type: int
+               ):
+        # type: (...) -> Tuple[ASN1_Object[Any], bytes]
+        if context is not None:
+            _context = context
+        else:
+            _context = cls.tag.context
         cls.check_string(s)
         p, remainder = BER_id_dec(s)
-        if p not in context:
+        if p not in _context:
             t = s
             if len(t) > 18:
                 t = t[:15] + b"..."
             raise BER_Decoding_Error("Unknown prefix [%02x] for [%r]" %
                                      (p, t), remaining=s)
-        codec = context[p].get_codec(ASN1_Codecs.BER)
+        tag = _context[p]
+        codec = cast('Type[BERcodec_Object[_K]]',
+                     tag.get_codec(ASN1_Codecs.BER))
         if codec == BERcodec_Object:
             # Value type defined as Unknown
             l, s = BER_num_dec(remainder)
             return ASN1_BADTAG(s[:l]), s[l:]
-        return codec.dec(s, context, safe)
+        return codec.dec(s, _context, safe, _depth=_depth)
 
     @classmethod
-    def dec(cls, s, context=None, safe=False):
+    def dec(cls,
+            s,  # type: bytes
+            context=None,  # type: Optional[Type[ASN1_Class]]
+            safe=False,  # type: bool
+            _depth=0,  # type: int
+            **_kwargs  # type: Any
+            ):
+        # type: (...) -> Tuple[Union[_ASN1_ERROR, ASN1_Object[_K]], bytes]
+        if _depth > MAX_BER_DEPTH:
+            raise BER_Exception("Reached maximum BER recursion limit")
         if not safe:
-            return cls.do_dec(s, context, safe)
+            return cls.do_dec(s, context, safe, _depth=_depth)
         try:
-            return cls.do_dec(s, context, safe)
+            return cls.do_dec(s, context, safe, _depth=_depth)
         except BER_BadTag_Decoding_Error as e:
-            o, remain = BERcodec_Object.dec(e.remaining, context, safe)
+            o, remain = BERcodec_Object.dec(
+                e.remaining,
+                context=context,
+                safe=safe,
+                _depth=_depth + 1,
+            )  # type: Tuple[ASN1_Object[Any], bytes]
             return ASN1_BADTAG(o), remain
         except BER_Decoding_Error as e:
-            return ASN1_DECODING_ERROR(s, exc=e), ""
+            return ASN1_DECODING_ERROR(s, exc=e), b""
         except ASN1_Error as e:
-            return ASN1_DECODING_ERROR(s, exc=e), ""
+            return ASN1_DECODING_ERROR(s, exc=e), b""
 
     @classmethod
-    def safedec(cls, s, context=None):
-        return cls.dec(s, context, safe=True)
+    def safedec(cls,
+                s,  # type: bytes
+                context=None,  # type: Optional[Type[ASN1_Class]]
+                _depth=0,  # type: int
+                **_kwargs  # type: Any
+                ):
+        # type: (...) -> Tuple[Union[_ASN1_ERROR, ASN1_Object[_K]], bytes]
+        return cls.dec(s, context, safe=True, _depth=_depth)
 
     @classmethod
-    def enc(cls, s):
-        if isinstance(s, six.string_types + (bytes,)):
-            return BERcodec_STRING.enc(s)
+    def enc(cls, s, size_len=0, **_kwargs):
+        # type: (_K, Optional[int], **Any) -> bytes
+        # Ignore unknown kwargs so shared field._codec_kwargs() dicts (OER/UPER
+        # keys) do not TypeError on BER packets.
+        if isinstance(s, (str, bytes)):
+            return BERcodec_STRING.enc(s, size_len=size_len)
         else:
-            return BERcodec_INTEGER.enc(int(s))
+            try:
+                return BERcodec_INTEGER.enc(int(s), size_len=size_len)  # type: ignore
+            except TypeError:
+                raise TypeError("Trying to encode an invalid value !")
 
 
 ASN1_Codecs.BER.register_stem(BERcodec_Object)
+ASN1_Codecs.BER.register_tagging(BER_tagging_enc, BER_tagging_dec)
 
 
 ##########################
 #    BERcodec objects    #
 ##########################
 
-class BERcodec_INTEGER(BERcodec_Object):
+class BERcodec_INTEGER(BERcodec_Object[int]):
     tag = ASN1_Class_UNIVERSAL.INTEGER
 
     @classmethod
-    def enc(cls, i):
-        s = []
+    def enc(cls, i, size_len=0, **_kwargs):  # type: ignore[override]
+        # type: (int, Optional[int], **Any) -> bytes
+        ls = []
         while True:
-            s.append(i & 0xff)
+            ls.append(i & 0xff)
             if -127 <= i < 0:
                 break
             if 128 <= i <= 255:
-                s.append(0)
+                ls.append(0)
             i >>= 8
             if not i:
                 break
-        s = [chb(hash(c)) for c in s]
-        s.append(BER_len_enc(len(s)))
-        s.append(chb(hash(cls.tag)))
+        s = [chb(int(c)) for c in ls]
+        s.append(BER_len_enc(len(s), size=size_len))
+        s.append(chb(int(cls.tag)))
         s.reverse()
         return b"".join(s)
 
     @classmethod
-    def do_dec(cls, s, context=None, safe=False):
+    def do_dec(cls,
+               s,  # type: bytes
+               context=None,  # type: Optional[Type[ASN1_Class]]
+               safe=False,  # type: bool
+               _depth=0,  # type: int
+               ):
+        # type: (...) -> Tuple[ASN1_Object[int], bytes]
         l, s, t = cls.check_type_check_len(s)
-        x = 0
-        if s:
-            if orb(s[0]) & 0x80:  # negative int
-                x = -1
-            for c in s:
-                x <<= 8
-                x |= orb(c)
-        return cls.asn1_object(x), t
+        # One pass: shifting a growing integer per octet was quadratic in width.
+        return cls.asn1_object(int.from_bytes(s, "big", signed=True)), t
 
 
 class BERcodec_BOOLEAN(BERcodec_INTEGER):
     tag = ASN1_Class_UNIVERSAL.BOOLEAN
 
 
-class BERcodec_BIT_STRING(BERcodec_Object):
+class BERcodec_BIT_STRING(BERcodec_Object[str]):
     tag = ASN1_Class_UNIVERSAL.BIT_STRING
 
     @classmethod
-    def do_dec(cls, s, context=None, safe=False):
+    def do_dec(cls,
+               s,  # type: bytes
+               context=None,  # type: Optional[Type[ASN1_Class]]
+               safe=False,  # type: bool
+               _depth=0,  # type: int
+               ):
+        # type: (...) -> Tuple[ASN1_Object[str], bytes]
         # /!\ the unused_bits information is lost after this decoding
         l, s, t = cls.check_type_check_len(s)
         if len(s) > 0:
-            unused_bits = orb(s[0])
+            unused_bits = s[0]
             if safe and unused_bits > 7:
                 raise BER_Decoding_Error(
                     "BERcodec_BIT_STRING: too many unused_bits advertised",
                     remaining=s
                 )
-            s = "".join(binrepr(orb(x)).zfill(8) for x in s[1:])
+            fs = "".join(binrepr(x).zfill(8) for x in s[1:])
             if unused_bits > 0:
-                s = s[:-unused_bits]
-            return cls.tag.asn1_object(s), t
+                fs = fs[:-unused_bits]
+            return cls.tag.asn1_object(fs), t
         else:
             raise BER_Decoding_Error(
                 "BERcodec_BIT_STRING found no content "
@@ -375,9 +502,10 @@ class BERcodec_BIT_STRING(BERcodec_Object):
             )
 
     @classmethod
-    def enc(cls, s):
+    def enc(cls, _s, size_len=0, **_kwargs):  # type: ignore[override]
+        # type: (AnyStr, Optional[int], **Any) -> bytes
         # /!\ this is DER encoding (bit strings are only zero-bit padded)
-        s = bytes_encode(s)
+        s = bytes_encode(_s)
         if len(s) % 8 == 0:
             unused_bits = 0
         else:
@@ -386,20 +514,27 @@ class BERcodec_BIT_STRING(BERcodec_Object):
         s = b"".join(chb(int(b"".join(chb(y) for y in x), 2))
                      for x in zip(*[iter(s)] * 8))
         s = chb(unused_bits) + s
-        return chb(hash(cls.tag)) + BER_len_enc(len(s)) + s
+        return chb(int(cls.tag)) + BER_len_enc(len(s), size=size_len) + s
 
 
-class BERcodec_STRING(BERcodec_Object):
+class BERcodec_STRING(BERcodec_Object[str]):
     tag = ASN1_Class_UNIVERSAL.STRING
 
     @classmethod
-    def enc(cls, s):
-        s = bytes_encode(s)
+    def enc(cls, _s, size_len=0, **_kwargs):  # type: ignore[override]
+        # type: (Union[str, bytes], Optional[int], **Any) -> bytes
+        s = bytes_encode(_s)
         # Be sure we are encoding bytes
-        return chb(hash(cls.tag)) + BER_len_enc(len(s)) + s
+        return chb(int(cls.tag)) + BER_len_enc(len(s), size=size_len) + s
 
     @classmethod
-    def do_dec(cls, s, context=None, safe=False):
+    def do_dec(cls,
+               s,  # type: bytes
+               context=None,  # type: Optional[Type[ASN1_Class]]
+               safe=False,  # type: bool
+               _depth=0,  # type: int
+               ):
+        # type: (...) -> Tuple[ASN1_Object[Any], bytes]
         l, s, t = cls.check_type_check_len(s)
         return cls.tag.asn1_object(s), t
 
@@ -408,37 +543,46 @@ class BERcodec_NULL(BERcodec_INTEGER):
     tag = ASN1_Class_UNIVERSAL.NULL
 
     @classmethod
-    def enc(cls, i):
+    def enc(cls, i, size_len=0, **_kwargs):  # type: ignore[override]
+        # type: (int, Optional[int], **Any) -> bytes
         if i == 0:
-            return chb(hash(cls.tag)) + b"\0"
+            return chb(int(cls.tag)) + b"\0"
         else:
-            return super(cls, cls).enc(i)
+            return super(cls, cls).enc(i, size_len=size_len)
 
 
-class BERcodec_OID(BERcodec_Object):
+class BERcodec_OID(BERcodec_Object[bytes]):
     tag = ASN1_Class_UNIVERSAL.OID
 
     @classmethod
-    def enc(cls, oid):
-        oid = bytes_encode(oid)
+    def enc(cls, _oid, size_len=0, **_kwargs):  # type: ignore[override]
+        # type: (AnyStr, Optional[int], **Any) -> bytes
+        oid = bytes_encode(_oid)
         if oid:
             lst = [int(x) for x in oid.strip(b".").split(b".")]
         else:
             lst = list()
         if len(lst) >= 2:
             lst[1] += 40 * lst[0]
-            del(lst[0])
+            del lst[0]
         s = b"".join(BER_num_enc(k) for k in lst)
-        return chb(hash(cls.tag)) + BER_len_enc(len(s)) + s
+        return chb(int(cls.tag)) + BER_len_enc(len(s), size=size_len) + s
 
     @classmethod
-    def do_dec(cls, s, context=None, safe=False):
+    def do_dec(cls,
+               s,  # type: bytes
+               context=None,  # type: Optional[Type[ASN1_Class]]
+               safe=False,  # type: bool
+               _depth=0,  # type: int
+               ):
+        # type: (...) -> Tuple[ASN1_Object[bytes], bytes]
         l, s, t = cls.check_type_check_len(s)
         lst = []
         while s:
             l, s = BER_num_dec(s)
             lst.append(l)
-        if (len(lst) > 0):
+        if lst:
+            # X.690 sect 8.19.4
             lst.insert(0, lst[0] // 40)
             lst[1] %= 40
         return (
@@ -475,6 +619,10 @@ class BERcodec_IA5_STRING(BERcodec_STRING):
     tag = ASN1_Class_UNIVERSAL.IA5_STRING
 
 
+class BERcodec_GENERAL_STRING(BERcodec_STRING):
+    tag = ASN1_Class_UNIVERSAL.GENERAL_STRING
+
+
 class BERcodec_UTC_TIME(BERcodec_STRING):
     tag = ASN1_Class_UNIVERSAL.UTC_TIME
 
@@ -495,25 +643,45 @@ class BERcodec_BMP_STRING(BERcodec_STRING):
     tag = ASN1_Class_UNIVERSAL.BMP_STRING
 
 
-class BERcodec_SEQUENCE(BERcodec_Object):
+class BERcodec_SEQUENCE(BERcodec_Object[Union[bytes, List[BERcodec_Object[Any]]]]):  # noqa: E501
     tag = ASN1_Class_UNIVERSAL.SEQUENCE
 
     @classmethod
-    def enc(cls, ll):
-        if not isinstance(ll, bytes):
-            ll = b"".join(x.enc(cls.codec) for x in ll)
-        return chb(hash(cls.tag)) + BER_len_enc(len(ll)) + ll
+    def enc(cls, _ll, size_len=None, **_kwargs):  # type: ignore[override]
+        # type: (Union[bytes, List[BERcodec_Object[Any]]], Optional[int], **Any) -> bytes  # noqa: E501
+        if isinstance(_ll, bytes):
+            ll = _ll
+        else:
+            ll = b"".join(x.enc(cls.codec) for x in _ll)
+        # None = apply conf; explicit 0 keeps short-form lengths.
+        if size_len is None:
+            size_len = conf.ASN1_default_long_size
+        return chb(int(cls.tag)) + BER_len_enc(len(ll), size=size_len) + ll
 
     @classmethod
-    def do_dec(cls, s, context=None, safe=False):
+    def do_dec(cls,
+               s,  # type: bytes
+               context=None,  # type: Optional[Type[ASN1_Class]]
+               safe=False,  # type: bool
+               _depth=0,  # type: int
+               ):
+        # type: (...) -> Tuple[ASN1_Object[Union[bytes, List[Any]]], bytes]
         if context is None:
             context = cls.tag.context
+        if _depth > MAX_BER_DEPTH:
+            raise BER_Exception("Reached maximum BER recursion limit")
         ll, st = cls.check_type_get_len(s)  # we may have len(s) < ll
         s, t = st[:ll], st[ll:]
         obj = []
         while s:
             try:
-                o, s = BERcodec_Object.dec(s, context, safe)
+                o, remain = BERcodec_Object.dec(
+                    s,
+                    context=context,
+                    safe=safe,
+                    _depth=_depth + 1,
+                )  # type: Tuple[ASN1_Object[Any], bytes]
+                s = remain
             except BER_Decoding_Error as err:
                 err.remaining += t
                 if err.decoded is not None:
@@ -535,15 +703,22 @@ class BERcodec_IPADDRESS(BERcodec_STRING):
     tag = ASN1_Class_UNIVERSAL.IPADDRESS
 
     @classmethod
-    def enc(cls, ipaddr_ascii):
+    def enc(cls, ipaddr_ascii, size_len=0, **_kwargs):  # type: ignore[override]
+        # type: (str, Optional[int], **Any) -> bytes
         try:
             s = inet_aton(ipaddr_ascii)
         except Exception:
             raise BER_Encoding_Error("IPv4 address could not be encoded")
-        return chb(hash(cls.tag)) + BER_len_enc(len(s)) + s
+        return chb(int(cls.tag)) + BER_len_enc(len(s), size=size_len) + s
 
     @classmethod
-    def do_dec(cls, s, context=None, safe=False):
+    def do_dec(cls,
+               s,  # type: bytes
+               context=None,  # type: Optional[Any]
+               safe=False,  # type: bool
+               _depth=0,  # type: int
+               ):
+        # type: (...) -> Tuple[ASN1_Object[str], bytes]
         l, s, t = cls.check_type_check_len(s)
         try:
             ipaddr_ascii = inet_ntoa(s)
@@ -555,6 +730,10 @@ class BERcodec_IPADDRESS(BERcodec_STRING):
 
 class BERcodec_COUNTER32(BERcodec_INTEGER):
     tag = ASN1_Class_UNIVERSAL.COUNTER32
+
+
+class BERcodec_COUNTER64(BERcodec_INTEGER):
+    tag = ASN1_Class_UNIVERSAL.COUNTER64
 
 
 class BERcodec_GAUGE32(BERcodec_INTEGER):

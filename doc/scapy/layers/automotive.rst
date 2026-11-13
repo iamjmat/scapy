@@ -1,58 +1,248 @@
-**********
-Automotive
-**********
+.. note:: This document is under a `Creative Commons Attribution - Non-Commercial - Share Alike 2.5 <http://creativecommons.org/licenses/by-nc-sa/2.5/>`_ license.
 
+#################################
+Automotive-specific Documentation
+#################################
+
+.. sectionauthor:: Nils Weiss <nils@we155.de>
+
+********
 Overview
-========
+********
 
 .. note::
-    All automotive related features work best on Linux systems. CANSockets and ISOTPSockets in Scapy are based on Linux kernel modules.
-    The python-can project is used to support CAN and CANSockets on other systems, besides Linux.
-    This guide explains the hardware setup on a BeagleBone Black. The BeagleBone Black was chosen because of its two CAN interfaces on the main processor.
-    The presence of two CAN interfaces in one device gives the possibility of CAN MITM attacks and session hijacking.
-    The Cannelloni framework turns a single board computer into a CAN-to-UDP interface, which gives you the freedom to run Scapy
-    on a more powerful machine.
+    All automotive-related features work best on Linux systems. CANSockets and ISOTPSockets are based on Linux kernel modules. The python-can project is used to support CAN and CANSockets on a wider range of operating systems and CAN hardware interfaces.
 
 Protocols
----------
-
-The following table should give a brief overview about all automotive capabilities
-of Scapy. Most application layer protocols have many specialized ``Packet`` classes.
-These special purpose classes are not part of this overview. Use the ``explore()``
-function to get all information about one specific protocol.
-
-+---------------------+----------------------+--------------------------------------------------------+
-| OSI Layer           | Protocol             | Scapy Implementations                                  |
-+=====================+======================+========================================================+
-| Application Layer   | UDS (ISO 14229)      | UDS, UDS_*, UDS_TesterPresentSender                    |
-|                     +----------------------+--------------------------------------------------------+
-|                     | GMLAN                | GMLAN, GMLAN_*, GMLAN_TesterPresentSender              |
-|                     +----------------------+--------------------------------------------------------+
-|                     | SOME/IP              | SOMEIP, SD                                             |
-|                     +----------------------+--------------------------------------------------------+
-|                     | BMW HSFZ             | HSFZ, HSFZSocket                                       |
-|                     +----------------------+--------------------------------------------------------+
-|                     | OBD                  | OBD, OBD_S0X                                           |
-|                     +----------------------+--------------------------------------------------------+
-|                     | CCP                  | CCP, DTO, CRO                                          |
-+---------------------+----------------------+--------------------------------------------------------+
-| Transportation Layer| ISO-TP (ISO 15765-2) | ISOTPSocket, ISOTPNativeSocket, ISOTPSoftSocket        |
-|                     |                      |                                                        |
-|                     |                      | ISOTPSniffer, ISOTPMessageBuilder, ISOTPSession        |
-|                     |                      |                                                        |
-|                     |                      | ISOTPHeader, ISOTPHeaderEA, ISOTPScan                  |
-|                     |                      |                                                        |
-|                     |                      | ISOTP, ISOTP_SF, ISOTP_FF, ISOTP_CF, ISOTP_FC          |
-+---------------------+----------------------+--------------------------------------------------------+
-| Data Link Layer     | CAN (ISO 11898)      | CAN, CANSocket, rdcandump, CandumpReader               |
-+---------------------+----------------------+--------------------------------------------------------+
-
-
-CAN Layer
 =========
 
-How-To
+The following table should give a brief overview of all the automotive-related capabilities
+of Scapy. Most application layer protocols have many specialized ``Packet`` classes.
+These special-purpose ``Packets`` are not part of this overview. Use the ``explore()``
+function to get all information about one specific protocol.
+
++----------------------+----------------------+--------------------------------------------------------+
+| OSI Layer            | Protocol             | Scapy Implementations                                  |
++======================+======================+========================================================+
+| Application Layer    | UDS (ISO 14229)      | UDS, UDS_*, UDS_TesterPresentSender                    |
+|                      +----------------------+--------------------------------------------------------+
+|                      | GMLAN                | GMLAN, GMLAN_*, GMLAN_[Utilities]                      |
+|                      +----------------------+--------------------------------------------------------+
+|                      | SOME/IP              | SOMEIP, SD                                             |
+|                      +----------------------+--------------------------------------------------------+
+|                      | BMW HSFZ             | HSFZ, HSFZSocket, UDS_HSFZSocket                       |
+|                      +----------------------+--------------------------------------------------------+
+|                      | OBD                  | OBD, OBD_S0[0-9A]                                      |
+|                      +----------------------+--------------------------------------------------------+
+|                      | CCP                  | CCP, DTO, CRO                                          |
+|                      +----------------------+--------------------------------------------------------+
+|                      | XCP                  | XCPOnCAN, XCPOnUDP, XCPOnTCP, CTORequest, CTOResponse, |
+|                      |                      | DTO                                                    |
++----------------------+----------------------+--------------------------------------------------------+
+| Transportation Layer | ISO-TP (ISO 15765-2) | ISOTPSocket, ISOTPNativeSocket, ISOTPSoftSocket        |
+|                      |                      |                                                        |
+|                      |                      | ISOTPSniffer, ISOTPMessageBuilder, ISOTPSession        |
+|                      |                      |                                                        |
+|                      |                      | ISOTPHeader, ISOTPHeaderEA, isotp_scan                 |
+|                      |                      |                                                        |
+|                      |                      | ISOTP, ISOTP_SF, ISOTP_FF, ISOTP_CF, ISOTP_FC          |
++----------------------+----------------------+--------------------------------------------------------+
+| Data Link Layer      | CAN (ISO 11898)      | CAN, CANSocket, rdcandump, CandumpReader               |
++----------------------+----------------------+--------------------------------------------------------+
+
+
+********************
+Technical Background
+********************
+
+Parts of this section were published in a study report [10]_.
+
+Physical Protocols
+==================
+
+More than 20 different communication protocols exist for the vehicle’s internal wired communication. Most vehicles make use of five to ten different protocols for their internal communication. The decision which communication protocol is used from an Original Equipment Manufacturer (OEM) is usually made by the trade-off between the costs for communication technology and the final car price. The four major communication technologies for inter-ECU communication are Controller Area Network (CAN), FlexRay, Local Interconnect Network (LIN), and Automotive Ethernet. For security considerations, these are the most relevant protocols for wired communication in vehicles.
+
+LIN
+---
+LIN is a single wire communication protocol for low data rates. Actuators and sensors of a vehicle exchange information with an ECU, acting as a LIN master. Software updates over LIN are possible, but the LIN slaves usually do not need software updates because of their limited functionality.
+
+CAN
+---
+CAN is by far the most used communication technology for inter-ECU communication in vehicles. In older or cheaper vehicles, CAN is still the primary protocol for a vehicle’s backbone communication. Safety-critical communication during a vehicle’s operation, diagnostic information, and software updates are transferred between ECUs over CAN. The lack of security features in the protocol itself, combined with the general use, makes CAN the primary protocol for security investigations.
+
+FlexRay
+-------
+The FlexRay consortium designed FlexRay as a successor of CAN. Modern vehicles have higher demands on communication bandwidth. By design, FlexRay is a fast and reliable communication protocol for inter-ECU communication. FlexRay components are more expensive than CAN components, leading to a more selective use by OEMs.
+
+Automotive Ethernet
+-------------------
+Recent upper-class vehicles implement Automotive Ethernet, the new backbone technology for internal vehicle communication. The rapidly grown bandwidth demands already replace FlexRay. The primary reasons for these demands are driver-assistant and autonomous-driving features. Only the physical layer (layer 1) of the Open Systems Interconnection (OSI) model distinguishes Ethernet (IEEE 802.3) from Automotive Ethernet (BroadR-Reach). This design decision leads to multiple advantages. For example, communication stacks of operating systems can be used without modification and routing, filtering, and firewall systems. Automotive Ethernet components are already cheaper than FlexRay components, which will lead to vehicle topologies, where CAN and Automotive Ethernet are the most used communication protocols.
+
+Topologies
+==========
+
+Line-Bus
 --------
+
+.. _fig-line-bus:
+
+.. figure:: ../graphics/automotive/Simple-CAN-Bus-.png
+
+        Line-Bus network topology
+
+The first vehicles with CAN bus used a single network with a line-bus topology. Some lower-priced vehicles still use one or two shared CAN bus networks for their internal communication nowadays. The downside of this topology is its vulnerability and the lack of network separation. All ECUs of a vehicle are connected on a shared bus. Since CAN does not support security features from its protocol definition, any participant on this bus can communicate directly with all other participants, which allows an attacker to affect all ECUs, even safety-critical ones, by compromising one single ECU. The overall security level of this network is given from the security level of the weakest participant.
+
+Central Gateway
+---------------
+
+.. _fig-cgw:
+
+.. figure:: ../graphics/automotive/ZGW-CAN-Bus-.png
+
+        Network topology with central GW ECU
+
+The central Gateway (GW) topology can be found in higher-priced older cars and medium-priced to lower-priced recent cars. A centralized GW ECU separates domain-specific sub-networks. This allows an OEM to encapsulate all ECUs with remote attack surfaces in one sub-network. ECUs with safety-critical functionalities are located in an individual CAN network. Next to CAN, FlexRay might also be used as a communication protocol inside a separate network domain. The security of a safety-critical network in this topology depends mainly on the central GW ECU’s security. This architecture increases the overall security level of a vehicle through domain separation. After an attacker successfully exploited an ECU through an arbitrary attack surface, a second exploitable vulnerability or a logical bug is necessary to compromise a different domain, a safety-critical network, inside a vehicle. This second exploit or logical bug is necessary to overcome the network separation of the central GW ECU.
+
+Central Gateway and Domain Controller
+-------------------------------------
+
+.. _fig-dc:
+
+.. figure:: ../graphics/automotive/DC-ZGW-CAN-Bus-.png
+
+        Network topology with Automotive-Ethernet backbone and DC
+
+A new topology with central GW and Domain Controllers (DCs) can be found in the latest higher-priced vehicles. The increasing demand for bandwidth in modern vehicles with autonomous driving and driver assistant features led to this topology. An Automotive Ethernet network is used as a communication backbone for the entire vehicle. Individual domains, connected through a DC with the central GW, form the vehicle’s backbone. The individual DCs can control and regulate the data communication between a domain and the vehicle’s backbone. This topology achieves a very-high security level through a strong network separation with individual DCs, acting as gateway and firewall, to the vehicle’s backbone network. OEMs have the advantage of dynamic information routing next to this security improvement, an enabler for Feature on Demand (FoD) services.
+
+Automotive Communication Protocols
+==================================
+
+This section provides an overview of relevant communication protocols for security evaluations in automotive networks. In contrast to section "Physical Protocols", this section focuses on properties for data communication.
+
+CAN
+---
+
+The CAN communication technology was invented in 1983 as a message-based robust vehicle bus communication system. The Robert Bosch GmbH designed multiple communication features into the CAN standard to achieve a robust and computation efficient protocol for controller area networks. Remarkable for the communication behavior of CAN is the internal state machine for transmission errors. This state machine implements a fail silent behavior to protect a safety-critical network from babbling idiot nodes. If a specific limit of reception errors (REC) or transmission errors (TEC) occurred, the CAN driver changes its state from error-active to error-passive and finally to bus-off.
+
+.. _fig-can-bus-states:
+
+.. figure:: ../graphics/automotive/can-bus-states.png
+
+        CAN bus states on transmission errors. Receive Error Counter (REC), Transmit Error Counter (TEC)
+
+In recent years, this protocol specification was abused for Denial of Service (DoS) attacks and information gathering attacks on the CAN network of a vehicle. Cho et al. demonstrated a DoS attack against CAN networks by abusing the bus-off state of ECUs [1]_. Injections of communication errors in CAN frames of one specific node caused a high transmission error count in the node under attack, forcing the attacked node to enter the bus-off state. In 2019 Kulandaivel et al. combined this attack with statistical analysis to achieve a fast and inexpensive network mapping in vehicular networks [2]_. They combined statistical analysis of the CAN network traffic before and after the bus-off attack was applied to a node. All missing CAN frames in the network traffic after an ECU was attacked could now be mapped to the ECU under attack, helping researchers identify the origin ECU of a CAN frame. Ken Tindell published a comprehensive summary of low level attacks on CANs in 2019 [3]_.
+
+.. _fig-can-full-frame:
+
+.. figure:: ../graphics/automotive/CAN-full-frame.jpg
+
+        Complete CAN data frame structure [9]_
+
+The above figure shows a CAN frame and its fields as it is transferred over the network. For information exchange, only the fields arbitration, control, and data are relevant. These are the only fields to which a usual application software has access. All other fields are evaluated on a hardware-layer and, in most cases, are not forwarded to an application. The data field has a variable length and can hold up to eight bytes. The length of the data field is specified by the data length code inside the control field. Important variations of this example are CAN-frames with extended arbitration fields and the Controller Area Network Flexible Data-Rate (CAN FD) protocol. On Linux, every received CAN frame is passed to SocketCAN. SocketCAN allows the CAN handling via network sockets of the operating system. SocketCAN was created by Oliver Hartkopp and added to the Linux Kernel version 2.6.25 [4]_. Figure 2.7 shows the frame structure, how CAN frames are encoded if a user-land application receives data from a CAN socket.
+
+.. _fig-can-socket-frame:
+
+.. figure:: ../graphics/automotive/can-frame-socket-can.png
+
+        CAN frame defined by SocketCAN
+
+The comparison of above figures clearly shows the loss of information during the CAN frame processing from a physical layer driver. Almost every CAN driver acts in the same way, whether an application code runs on a microcontroller or a Linux kernel. This also means that a standard application does not have access to the Cyclic Redundancy Check (CRC) field, the acknowledgment bit, or the end-of-frame field.
+
+Through the CAN communication in a vehicle or a separated domain, ECUs exchange sensor-data and control inputs; this data is mainly not secured and can be modified by assailants. Attackers can easily spoof sensor values on a CAN bus to trigger malicious reactions of other ECUs. Miller and Valasek described this spoofing attack during their studies on automotive networks [5]_. To prevent attacks on safety-critical data transferred over CAN, Automotive Open System Architecture (AUTOSAR) released a secure onboard communication specification [6]_.
+
+ISO-TP (ISO 15765-2)
+--------------------
+
+The CAN protocol supports only eight bytes of data. Use-cases like diagnostic operations or ECU programming require much higher payloads than the CAN protocol supports. For these purposes, the automotive industry standardized the Transport Layer (ISO-TP) (ISO 15765-2) protocol [7]_. ISO-TP is a transportation layer protocol on top of CAN. Payloads with up to 4095 bytes can be transferred between ISO-TP endpoints fragmented in CAN frames. The ISO-TP protocol handling requires four special frame types.
+
+.. _fig-isotp-flow:
+
+.. figure:: ../graphics/automotive/isotp-flow.png
+
+        ISO-TP fragmented communication
+
+The different types of ISO-TP frames are shown in the following figure. The payload of a CAN frame gets replaced by one of the four ISO-TP frames. The individual ISO-TP frames have different purposes. A single frame can transfer between 1 and 7 bytes of ISO-TP message data. The len field of a Single Frame or a First Frame indicates the ISO-TP message length. Every message with more than 7 bytes of payload data must be fragmented into a First Frame, followed by multiple Consecutive Frames. This communication is illustrated in the above figure. After the First Frame is sent from a sender, the receiver has to communicate its reception capabilities through a Flow Control Frame to the sender. Only after this Flow Control Frame is received, the sender is allowed to communicate the Consecutive Frames according to the receiver’s capabilities.
+
+.. _fig-isotp-frames:
+
+.. figure:: ../graphics/automotive/isotp-frames.png
+
+        ISO-TP frame types
+
+ISO-TP acts as a transport protocol with the support of directed communication through addressing mechanisms. In vehicles, ISO-TP is mainly used as a transport protocol for diagnostic communication. In rare cases, ISO-TP is also used to exchange larger data between ECUs of a vehicle. Security measures have to be applied to the application layer protocol transported through ISO-TP since ISO-TP has no capabilities to secure its transported data.
+
+DoIP
+----
+
+Diagnostic over IP (DoIP) was first implemented on automotive networks with a centralized gateway topology. A centralized GW functions as a DoIP endpoint that routes diagnostic messages to the desired network, allowing manufacturers to program or diagnose multiple ECUs in parallel. Since the Internet Protocol (IP) communication between a repair-shop tester and the GW is many times faster than the communication between the GW ECU and a target ECU connected over CAN, the remaining bandwidth of the IP communication can be used to start further DoIP connections to other ECUs in different CAN domains. DoIP is specified as part of AUTOSAR and in ISO 13400-2. Similar to ISO-TP, DoIP does not specify special security measures. The responsibility regarding secured communication is delegated to the application layer protocol.
+
+Diagnostic Protocols
+--------------------
+
+Two examples of diagnostic protocols are General Motor Local Area Network (GMLAN) and Unified Diagnostic Service (UDS) (ISO 14229-2). The General Motors Corporation uses GMLAN. German OEMs mainly use UDS. Both protocols are very similar from a specification point of view, and both protocols use either ISO-TP or DoIP messages for a directed communication with a target ECU. Since different OEMs use UDS, every manufacturer adds its custom additions to the standard. Also, every manufacturer uses individual ISO-TP addressing for the directed communication with an ECU. GMLAN includes more precise definitions about ECU addressing and an ECU’s internal behavior compared to UDS.
+
+UDS and GMLAN follow a tree-like message structure, where the first byte identifies the service. Every service is answered by a response. Two types of responses are defined in the standard. Negative responses are indicated through the service 0x7F. Positive responses are identified by the request service identifier incremented with 0x40.
+
+.. _fig-diag-stack:
+
+.. figure:: ../graphics/automotive/diag-stack.png
+
+        Automotive Diagnostic Protocol Stack
+
+A clear separation between the transport and the application layer allows creating application layer tools for both network stacks. The figure above provides an overview of relevant protocols and the corresponding layers. UDS defines a clean separation between application and transport layer. On CAN based networks, ISO-TP is used for this purpose. The CAN protocol can be treated as the network access protocol. This allows users to replace ISO-TP and CAN with DoIP or HSFZ and Ethernet. The GMLAN protocol combines transport and application layer specifications very similar to ISO-TP and UDS. Because of that similarity, identical application layer-specific scan techniques can be applied. To overcome the bandwidth limitations of CAN, the latest vehicle architectures use an Ethernet-based diagnostic protocol (DoIP, HSFZ) to communicate with a central gateway ECU. The central gateway ECU routes application layer packets from an Ethernet-based network to a CAN based vehicle internal network. In general, the diagnostic functions of all ECUs in a vehicle can be accessed from the OBD connector over UDSonCAN or UDSonIP.
+
+SOME/IP
+-------
+
+Scalable service-Oriented MiddlewarE over IP (SOME/IP) defines a new philosophy of data communication in automotive networks. SOME/IP is used to exchange data between network domain controllers in the latest vehicle networks. SOME/IP supports subscription and notification mechanisms, allowing domain controllers to dynamically subscribe to data provided by another domain controller dependent on the vehicle’s state. SOME/IP transports data between domain controllers and the gateway that a vehicle needs during its regular operation. The use-cases of SOME/IP are similar to the use-cases of CAN communication. The main purpose is the information exchange of sensor and actuator data between ECUs. This usage emphasizes SOME/IP communication as a rewarding target for cyber-attacks.
+
+CCP/XCP
+-------
+
+Universal Measurement and Calibration Protocol (XCP), the CAN Calibration Protocol (CCP) successor, is a calibration protocol for automotive systems, standardized by ASAM e.V. in 2003. The primary usage of XCP is during the testing and calibration phase of ECU or vehicle development. CCP is designed for use on CAN. No message in CCP exceeds the 8-byte limitation of CAN. To overcome this restriction, XCP was designed to aim for compatibility with a wide range of transport protocols. XCP can be used on top of CAN, CAN FD, Serial Peripheral Interface (SPI), Ethernet, Universal Serial Bus (USB), and FlexRay. The features of CCP and XCP are very similar; however, XCP has a larger functional scope and optimizations for data efficiency.
+
+Both protocols have a session-based communication procedure and support authentication through seed and key mechanisms between a master and multiple slave nodes. A master node is typically an engineering Personal Computer (PC). In vehicles, slave nodes are ECUs for configuration. XCP also supports simulation. A vehicle engineer can debug a MATLAB Simulink model through XCP. In this case, the simulated model acts as the XCP slave node. CCP and XCP can read and write to the memory of an ECU. Another main feature is data acquisition. Both protocols support a procedure that allows an engineer to configure a so-called data acquisition list with memory addresses of interest. All memory specified in such a list will be read periodically and be broadcast in a CCP or XCP Data Acquisition (DAQ) packet on the chosen communication channel. The following figure gives an overview of all supported communication and packet types in XCP. In the Command Transfer Object (CTO) area, all communication follows a request and response procedure always initiated by the XCP master. A Command Packet (CMD) can receive a Command Response Packet (RES), an Error (ERR) packet, an Event Packet (EV), or a Service Request Packet (SERV) as a response. After the configuration of a slave through CTO CMDs, a slave can listen for Stimulation (STIM) packets and periodically send configured DAQ packets. The resources section in the following figure indicates the possible attack surfaces of this protocol (Programming (PGM), Calibration (CAL), DAQ, STIM) which an attacker could abuse. It is crucial for a vehicle’s security and safety that such protocols, which have their use only during calibration and development of a vehicle, are disabled or removed before a vehicle is shipped to a customer.
+
+.. _fig-xcp-reference:
+
+.. figure:: ../graphics/automotive/XCP_ReferenceBook.png
+
+        XCP communication model between XCP Master and XCP Slave. This model shows the communication direction for CTO/Data Transfer Object (DTO) packages [8]_.
+
+**References**
+
+.. [1] Kyong-Tak Cho and Kang G. Shin. Error handling of in-vehicle networks makes them vulnerable. In Proceedings of the 2016 ACM SIGSAC Conference on Computer and Communications Security, CCS ’16, page 1044–1055, New York, NY, USA, 2016. Association for Computing Machinery.
+
+.. [2] Sekar Kulandaivel, Tushar Goyal, Arnav Kumar Agrawal, and Vyas Sekar. Canvas: Fast and inexpensive automotive network mapping. In 28th USENIX Security Symposium (USENIX Security 19), pages 389–405, Santa Clara, CA, August 2019. USENIX Association.
+
+.. [3] Ken Tindell. CAN Bus Security - Attacks on CAN bus and their mitigations, 2019. https://canislabs.com/wp-content/uploads/2020/12/2020-02-14-White-Paper-CAN-Security.pdf
+
+.. [4] Oliver Hartkopp. Readme file for the Controller Area Network Protocol Family (aka SocketCAN), 2020 (accessed January 29, 2020). https://www.kernel.org/doc/Documentation/networking/can.txt
+
+.. [5] Dr. Charlie Miller and Chris Valasek. Adventures in Automotive Networks and Control Units. DEF CON 21 Hacking Conference. Las Vegas, NV: DEF CON, August 2013. http://illmatics.com/car_hacking.pdf (accessed 2020-05-27)
+
+.. [6] AUTOSAR. Specification of Secure Onboard Communication, 2020 (accessed January 31, 2020). https://www.autosar.org/fileadmin/user_upload/standards/classic/4-3/AUTOSAR_SWS_SecureOnboardCommunication.pdf
+
+.. [7] ISO Central Secretary. Road vehicles – Diagnostic communication over Controller Area Network (DoCAN) – Part 2: Transport protocol and network layer services. Standard ISO 15765-2:2016, International Organization for Standardization, Geneva, CH, 2016.
+
+.. [8] Vector Informatik GmbH. XCP – The Standard Protocol for ECU Development. Vector Informatik GmbH, 2020 (accessed January 30, 2020). https://assets.vector.com/cms/content/application-areas/ecu-calibration/xcp/XCP_ReferenceBook_V3.0_EN.pdf
+
+.. [9] Pico Technology Ltd. Complete CAN data frame structure, 2020 (accessed February 14, 2020). https://www.picotech.com/images/uploads/library/topics/_med/CAN-full-frame.jpg
+
+.. [10] Nils Weiss. Security Testing in Safety-Critical Networks. PhD Study Report. http://www.kiv.zcu.cz/site/documents/verejne/vyzkum/publikace/technicke-zpravy/2020/Rigo_Weiss_2020_2.pdf
+
+
+******
+Layers
+******
+
+.. note:: **ATTENTION**: Animations below might be outdated.
+
+CAN
+===
+
+How-To
+------
 
 Send and receive a message over Linux SocketCAN::
 
@@ -67,15 +257,13 @@ Send and receive a message over Linux SocketCAN::
 
    socket.sr1(packet, timeout=1)
 
-Send a message over a Vector CAN-Interface::
+Send and receive a message over a Vector CAN-Interface::
 
-   import can
    load_layer("can")
    conf.contribs['CANSocket'] = {'use-python-can' : True}
    load_contrib('cansocket')
-   from can.interfaces.vector import VectorBus
 
-   socket = CANSocket(channel=VectorBus(0, bitrate=1000000))
+   socket = CANSocket(bustype='vector', channel=0, bitrate=1000000)
    packet = CAN(identifier=0x123, data=b'01020304')
 
    socket.send(packet)
@@ -84,64 +272,13 @@ Send a message over a Vector CAN-Interface::
    socket.sr1(packet)
 
 
-
-Tutorials
----------
-
-Linux SocketCAN
-^^^^^^^^^^^^^^^
-
-This subsection summarizes some basics about Linux SocketCAN. An excellent overview
-from Oliver Hartkopp can be found here: https://wiki.automotivelinux.org/_media/agl-distro/agl2017-socketcan-print.pdf
-
-Virtual CAN Setup
-^^^^^^^^^^^^^^^^^
-
-Linux SocketCAN supports virtual CAN interfaces. These interfaces are an easy way
-to do some first steps on a CAN-Bus without the requirement of special hardware.
-Besides that, virtual CAN interfaces are heavily used in Scapy unit test for automotive
-related contributions.
-
-Virtual CAN sockets require a special Linux kernel module. The following shell command loads the required module::
-
-    sudo modprobe vcan
-
-In order to use a virtual CAN interface some additional commands for setup are required.
-This snippet chooses the name ``vcan0`` for the virtual CAN interface. Any name can be chosen here::
-
-    sudo ip link add name vcan0 type vcan
-    sudo ip link set dev vcan0 up
-
-The same commands can be executed from Scapy like this::
-
-   from scapy.layers.can import *
-   import os
-
-   bashCommand = "/bin/bash -c 'sudo modprobe vcan; sudo ip link add name vcan0 type vcan; sudo ip link set dev vcan0 up'"
-   os.system(bashCommand)
-
-If it's required, a CAN interface can be set into a ``listen-only`` or ``loopback`` mode with ``ip link set`` commands::
-
-   ip link set vcan0 type can help  # shows additional information
-
-
-Linux can-utils
-^^^^^^^^^^^^^^^
-
-As part of Linux SocketCAN, some very useful commandline tools are provided from Oliver Hartkopp: https://github.com/linux-can/can-utils
-
-The following example shows basic functions of Linux can-utils. These utilities are very handy for
-quick checks, dumping, sending or logging of CAN messages from the command line.
-
-.. image:: ../graphics/animations/animation-cansend.svg
-
 CAN Frame
-^^^^^^^^^
+---------
 
 Basic information about CAN can be found here: https://en.wikipedia.org/wiki/CAN_bus
 
-The following examples assume that CAN layer in your Scapy session is loaded. If it isn't,
-the CAN layer can be loaded with this command in your Scapy session::
+The following examples assume that the CAN layer in your Scapy session is loaded.
+If it isn't, the CAN layer can be loaded with this command in your Scapy session::
 
     >>> load_layer("can")
 
@@ -163,8 +300,9 @@ Creation of an extended CAN frame::
 
 .. image:: ../graphics/animations/animation-scapy-canframe.svg
 
-CAN Frame in- and export
-^^^^^^^^^^^^^^^^^^^^^^^^
+
+CAN Frame import and export
+---------------------------
 
 CAN Frames can be written to and read from ``pcap`` files::
 
@@ -183,160 +321,9 @@ This allows you to use ``sniff`` and other functions from Scapy::
 
 .. image:: ../graphics/animations/animation-scapy-rdcandump.svg
 
-Scapy CANSocket
-^^^^^^^^^^^^^^^
-
-In Scapy, two kind of CANSockets are implemented. One implementation is called **Native CANSocket**,
-the other implementation is called **Python-can CANSocket**.
-
-Since Python 3 supports ``PF_CAN`` sockets, **Native CANSockets** can be used on a
-Linux based system with Python 3 or higher. These sockets have a performance advantage
-because ``select`` is callable on them. This has a big effect in MITM scenarios.
-
-For compatibility reasons, **Python-can CANSockets** were added to Scapy.
-On Windows or OSX and on all systems without Python 3, CAN buses can be accessed
-through ``python-can``. ``python-can`` needs to be installed on the system: https://github.com/hardbyte/python-can/
-**Python-can CANSockets** are a wrapper of python-can interface objects for Scapy.
-Both CANSockets provide the same API which makes them exchangeable under most conditions.
-Nevertheless some unique behaviours of each CANSocket type has to be respected.
-Some CAN-interfaces, like Vector hardware is only supported on Windows.
-These interfaces can be used through **Python-can CANSockets**.
-
-Native CANSocket
-^^^^^^^^^^^^^^^^
-
-Creating a simple native CANSocket::
-
-   conf.contribs['CANSocket'] = {'use-python-can': False} #(default)
-   load_contrib('cansocket')
-
-   # Simple Socket
-   socket = CANSocket(channel="vcan0")
-
-Creating a native CANSocket only listen for messages with Id == 0x200::
-
-   socket = CANSocket(channel="vcan0", can_filters=[{'can_id': 0x200, 'can_mask': 0x7FF}])
-
-Creating a native CANSocket only listen for messages with Id >= 0x200 and Id <= 0x2ff::
-
-   socket = CANSocket(channel="vcan0", can_filters=[{'can_id': 0x200, 'can_mask': 0x700}])
-
-Creating a native CANSocket only listen for messages with Id != 0x200::
-
-   socket = CANSocket(channel="vcan0", can_filters=[{'can_id': 0x200 | CAN_INV_FILTER, 'can_mask': 0x7FF}])
-
-Creating a native CANSocket with multiple can_filters::
-
-   socket = CANSocket(channel='vcan0', can_filters=[{'can_id': 0x200, 'can_mask': 0x7ff},
-                                                  {'can_id': 0x400, 'can_mask': 0x7ff},
-                                                  {'can_id': 0x600, 'can_mask': 0x7ff},
-                                                  {'can_id': 0x7ff, 'can_mask': 0x7ff}])
-
-Creating a native CANSocket which also receives its own messages::
-
-   socket = CANSocket(channel="vcan0", receive_own_messages=True)
-
-.. image:: ../graphics/animations/animation-scapy-native-cansocket.svg
-
-Sniff on a CANSocket:
-
-.. image:: ../graphics/animations/animation-scapy-cansockets-sniff.svg
-
-
-CANSocket python-can
-^^^^^^^^^^^^^^^^^^^^
-
-python-can is required to use various CAN-interfaces on Windows, OSX or Linux.
-The python-can library is used through a CANSocket object. To create a python-can
-CANSocket object, all parameters of a python-can ``interface.Bus`` object has to 
-be used for the initialization of the CANSocket.
-
-Ways of creating a python-can CANSocket::
-
-   conf.contribs['CANSocket'] = {'use-python-can': True}
-   load_contrib('cansocket')
-
-Creating a simple python-can CANSocket::
-
-   socket = CANSocket(bustype='socketcan', channel='vcan0', bitrate=250000)
-
-Creating a python-can CANSocket with multiple filters::
-
-   socket = CANSocket(bustype='socketcan', channel='vcan0', bitrate=250000,
-                   can_filters=[{'can_id': 0x200, 'can_mask': 0x7ff},
-                               {'can_id': 0x400, 'can_mask': 0x7ff},
-                               {'can_id': 0x600, 'can_mask': 0x7ff},
-                               {'can_id': 0x7ff, 'can_mask': 0x7ff}])
-
-For further details on python-can check: https://python-can.readthedocs.io/
-
-CANSocket MITM attack with bridge and sniff
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-This example shows how to use bridge and sniff on virtual CAN interfaces.
-For real world applications, use real CAN interfaces.
-Set up two vcans on Linux terminal::
-
-   sudo modprobe vcan
-   sudo ip link add name vcan0 type vcan
-   sudo ip link add name vcan1 type vcan
-   sudo ip link set dev vcan0 up
-   sudo ip link set dev vcan1 up
-
-Import modules::
-
-   import threading
-   load_contrib('cansocket')
-   load_layer("can")
-
-Create can sockets for attack::
-
-   socket0 = CANSocket(channel='vcan0')
-   socket1 = CANSocket(channel='vcan1')
-
-Create a function to send packet with threading::
-
-   def sendPacket():
-       sleep(0.2)
-       socket0.send(CAN(flags='extended', identifier=0x10010000, length=8, data=b'\x01\x02\x03\x04\x05\x06\x07\x08'))
-
-Create a function for forwarding or change packets::
-
-   def forwarding(pkt):
-       return pkt
-
-Create a function to bridge and sniff between two sockets::
-
-   def bridge():
-       bSocket0 = CANSocket(channel='vcan0')
-       bSocket1 = CANSocket(channel='vcan1')
-       bridge_and_sniff(if1=bSocket0, if2=bSocket1, xfrm12=forwarding, xfrm21=forwarding, timeout=1)
-       bSocket0.close()
-       bSocket1.close()
-
-Create threads for sending packet and to bridge and sniff::
-
-   threadBridge = threading.Thread(target=bridge)
-   threadSender = threading.Thread(target=sendMessage)
-
-Start the threads::
-
-   threadBridge.start()
-   threadSender.start()
-
-Sniff packets::
-
-   packets = socket1.sniff(timeout=0.3)
-
-Close the sockets::
-
-   socket0.close()
-   socket1.close()
-
-.. image:: ../graphics/animations/animation-scapy-cansockets-mitm.svg
-.. image:: ../graphics/animations/animation-scapy-cansockets-mitm2.svg
 
 DBC File Format and CAN Signals
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-------------------------------
 
 In order to support the DBC file format, ``SignalFields`` and the ``SignalPacket``
 classes were added to Scapy. ``SignalFields`` should only be used inside a ``SignalPacket``.
@@ -400,13 +387,217 @@ the ``init`` function of your ``CANSocket``.
 Canmatrix supports the creation of Scapy files from DBC or AUTOSAR XML files https://github.com/ebroecker/canmatrix
 
 
+CANSockets
+==========
+
+Linux SocketCAN
+---------------
+
+This subsection summarizes some basics about Linux SocketCAN. An excellent overview
+from Oliver Hartkopp can be found here: https://wiki.automotivelinux.org/_media/agl-distro/agl2017-socketcan-print.pdf
+
+Virtual CAN Setup
+^^^^^^^^^^^^^^^^^
+
+Linux SocketCAN supports virtual CAN interfaces. These interfaces are an easy way
+to do some first steps on a CAN-Bus without the requirement of special hardware.
+Besides that, virtual CAN interfaces are heavily used in Scapy unit tests for
+automotive-related contributions.
+
+Virtual CAN sockets require a special Linux kernel module. The following shell command loads the required module::
+
+    sudo modprobe vcan
+
+In order to use a virtual CAN interface some additional commands for setup are required.
+This snippet chooses the name ``vcan0`` for the virtual CAN interface. Any name can be chosen here::
+
+    sudo ip link add name vcan0 type vcan
+    sudo ip link set dev vcan0 up
+
+The same commands can be executed from Scapy like this::
+
+   from scapy.layers.can import *
+   import os
+
+   bashCommand = "/bin/bash -c 'sudo modprobe vcan; sudo ip link add name vcan0 type vcan; sudo ip link set dev vcan0 up'"
+   os.system(bashCommand)
+
+If it's required, a CAN interface can be set into a ``listen-only`` or ``loopback`` mode with ``ip link set`` commands::
+
+   ip link set vcan0 type can help  # shows additional information
+
+
+Linux can-utils
+^^^^^^^^^^^^^^^
+
+As part of Linux SocketCAN, some very useful command line tools are provided by
+Oliver Hartkopp: https://github.com/linux-can/can-utils
+
+The following example shows the basic functions of Linux can-utils. These utilities
+are very handy for quick checks, dumping, sending, or logging of CAN messages
+from the command line.
+
+.. image:: ../graphics/animations/animation-cansend.svg
+
+Scapy CANSocket
+---------------
+
+In Scapy, two kinds of CANSockets are implemented. One implementation is called **Native CANSocket**,
+the other implementation is called **Python-can CANSocket**.
+
+Since Python 3 supports ``PF_CAN`` sockets, **Native CANSockets** can be used on a
+Linux based system with Python 3 or higher. These sockets have a performance advantage
+because ``select`` is callable on them. This has a big effect in MITM scenarios.
+
+For compatibility reasons, **Python-can CANSockets** were added to Scapy.
+On Windows or OSX and on all systems without Python 3, CAN buses can be accessed
+through ``python-can``. ``python-can`` needs to be installed on the system: https://github.com/hardbyte/python-can/
+**Python-can CANSockets** are a wrapper of python-can interface objects for Scapy.
+Both CANSockets provide the same API which makes them exchangeable under most conditions.
+Nevertheless some unique behaviours of each CANSocket type have to be respected.
+Some CAN-interfaces, like Vector hardware, are only supported on Windows.
+These interfaces can be used through **Python-can CANSockets**.
+
+Native CANSocket
+^^^^^^^^^^^^^^^^
+
+Creating a simple native CANSocket::
+
+   conf.contribs['CANSocket'] = {'use-python-can': False} #(default)
+   load_contrib('cansocket')
+
+   # Simple Socket
+   socket = CANSocket(channel="vcan0")
+
+Creating a native CANSocket that only listens for messages with Id == 0x200::
+
+   socket = CANSocket(channel="vcan0", can_filters=[{'can_id': 0x200, 'can_mask': 0x7FF}])
+
+Creating a native CANSocket that only listens for messages with Id >= 0x200 and Id <= 0x2ff::
+
+   socket = CANSocket(channel="vcan0", can_filters=[{'can_id': 0x200, 'can_mask': 0x700}])
+
+Creating a native CANSocket that only listens for messages with Id != 0x200::
+
+   socket = CANSocket(channel="vcan0", can_filters=[{'can_id': 0x200 | CAN_INV_FILTER, 'can_mask': 0x7FF}])
+
+Creating a native CANSocket with multiple can_filters::
+
+   socket = CANSocket(channel='vcan0', can_filters=[{'can_id': 0x200, 'can_mask': 0x7ff},
+                                                  {'can_id': 0x400, 'can_mask': 0x7ff},
+                                                  {'can_id': 0x600, 'can_mask': 0x7ff},
+                                                  {'can_id': 0x7ff, 'can_mask': 0x7ff}])
+
+Creating a native CANSocket which also receives its own messages::
+
+   socket = CANSocket(channel="vcan0", receive_own_messages=True)
+
+.. image:: ../graphics/animations/animation-scapy-native-cansocket.svg
+
+Sniff on a CANSocket:
+
+.. image:: ../graphics/animations/animation-scapy-cansockets-sniff.svg
+
+
+CANSocket python-can
+^^^^^^^^^^^^^^^^^^^^
+
+python-can is required to use various CAN-interfaces on Windows, OSX or Linux.
+The python-can library is used through a CANSocket object. To create a python-can
+CANSocket object, all parameters of a python-can ``interface.Bus`` object have to
+be used for the initialization of the CANSocket.
+
+Ways of creating a python-can CANSocket::
+
+   conf.contribs['CANSocket'] = {'use-python-can': True}
+   load_contrib('cansocket')
+
+Creating a simple python-can CANSocket::
+
+   socket = CANSocket(bustype='socketcan', channel='vcan0', bitrate=250000)
+
+Creating a python-can CANSocket with multiple filters::
+
+   socket = CANSocket(bustype='socketcan', channel='vcan0', bitrate=250000,
+                   can_filters=[{'can_id': 0x200, 'can_mask': 0x7ff},
+                               {'can_id': 0x400, 'can_mask': 0x7ff},
+                               {'can_id': 0x600, 'can_mask': 0x7ff},
+                               {'can_id': 0x7ff, 'can_mask': 0x7ff}])
+
+For further details on python-can check: https://python-can.readthedocs.io/
+
+CANSocket MITM attack with bridge and sniff
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+This example shows how to use bridge and sniff on virtual CAN interfaces.
+For real world applications, use real CAN interfaces.
+Set up two vcans on Linux terminal::
+
+   sudo modprobe vcan
+   sudo ip link add name vcan0 type vcan
+   sudo ip link add name vcan1 type vcan
+   sudo ip link set dev vcan0 up
+   sudo ip link set dev vcan1 up
+
+Import modules::
+
+   import threading
+   load_contrib('cansocket')
+   load_layer("can")
+
+Create can sockets for attack::
+
+   socket0 = CANSocket(channel='vcan0')
+   socket1 = CANSocket(channel='vcan1')
+
+Create a function to send packet with threading::
+
+   def sendPacket():
+       sleep(0.2)
+       socket0.send(CAN(flags='extended', identifier=0x10010000, length=8, data=b'\x01\x02\x03\x04\x05\x06\x07\x08'))
+
+Create a function for forwarding or changing packets::
+
+   def forwarding(pkt):
+       return pkt
+
+Create a function to bridge and sniff between two sockets::
+
+   def bridge():
+       bSocket0 = CANSocket(channel='vcan0')
+       bSocket1 = CANSocket(channel='vcan1')
+       bridge_and_sniff(if1=bSocket0, if2=bSocket1, xfrm12=forwarding, xfrm21=forwarding, timeout=1)
+       bSocket0.close()
+       bSocket1.close()
+
+Create threads for sending packet and to bridge and sniff::
+
+   threadBridge = threading.Thread(target=bridge)
+   threadSender = threading.Thread(target=sendMessage)
+
+Start the threads::
+
+   threadBridge.start()
+   threadSender.start()
+
+Sniff packets::
+
+   packets = socket1.sniff(timeout=0.3)
+
+Close the sockets::
+
+   socket0.close()
+   socket1.close()
+
+.. image:: ../graphics/animations/animation-scapy-cansockets-mitm.svg
+.. image:: ../graphics/animations/animation-scapy-cansockets-mitm2.svg
+
 CAN Calibration Protocol (CCP)
 ==============================
 
 CCP is derived from CAN. The CAN-header is part of a CCP frame. CCP has two types
 of message objects. One is called Command Receive Object (CRO), the other is called
-Data Transmission Object (DTO). Usually CROs are sent to an ECU, and DTOs are received
-from an ECU. The information, if one DTO answers a CRO is implemented through a counter
+Data Transmission Object (DTO). Usually CROs are sent to an Ecu, and DTOs are received
+from an Ecu. The information, if one DTO answers a CRO is implemented through a counter
 field (ctr). If both objects have the same counter value, the payload of a DTO object
 can be interpreted from the command of the associated CRO object.
 
@@ -417,14 +608,14 @@ Creating a CRO message::
     CCP(identifier=0x711)/CRO(ctr=2)/GET_SEED(resource=2)
     CCP(identifier=0x711)/CRO(ctr=3)/UNLOCK(key=b"123456")
 
-If we aren't interested in the DTO of an ECU, we can just send a CRO message like this:
+If we aren't interested in the DTO of an Ecu, we can just send a CRO message like this:
 Sending a CRO message::
 
     pkt = CCP(identifier=0x700)/CRO(ctr=1)/CONNECT(station_address=0x02)
     sock = CANSocket(bustype='socketcan', channel='vcan0')
     sock.send(pkt)
 
-If we are interested in the DTO of an ECU, we need to set the basecls parameter of the
+If we are interested in the DTO of an Ecu, we need to set the basecls parameter of the
 CANSocket to CCP and we need to use sr1:
 Sending a CRO message::
 
@@ -448,11 +639,158 @@ Sending a CRO message::
 Since sr1 calls the answers function, our payload of the DTO objects gets interpreted with the
 command of our CRO object.
 
+
+Universal calibration and measurement protocol (XCP)
+====================================================
+
+XCP is the successor of CCP. It is usable with several protocols. Scapy includes CAN, UDP and TCP.
+XCP has two types of messages: Command Transfer Object (CTO) and Data Transmission Object (DTO).
+CTOs sent to an Ecu are requests (commands) and the Ecu has to reply with a positive response or an error.
+Additionally, the Ecu can send a CTO to inform the master about an asynchronous event (EV) or request a service execution (SERV).
+DTOs sent by the Ecu are called DAQ (Data AcQuisition) and include measured values.
+DTOs received by the Ecu are used for a periodic stimulation and are called STIM (Stimulation).
+
+
+Creating a CTO message::
+
+    CTORequest() / Connect()
+    CTORequest() / GetDaqResolutionInfo()
+    CTORequest() / GetSeed(mode=0x01, resource=0x00)
+
+To send the message over CAN a header has to be added::
+
+    pkt = XCPOnCAN(identifier=0x700) / CTORequest() / Connect()
+    sock = CANSocket(iface=can.interface.Bus(bustype='socketcan', channel='vcan0'))
+    sock.send(pkt)
+
+If we are interested in the response of an Ecu, we need to set the basecls parameter of the
+CANSocket to XCPonCAN and we need to use sr1:
+Sending a CTO message::
+
+    sock = CANSocket(bustype='socketcan', channel='vcan0', basecls=XCPonCAN)
+    dto = sock.sr1(pkt)
+
+Since sr1 calls the answers function, our payload of the XCP-response objects gets interpreted with the
+command of our CTO object. Otherwise it could not be interpreted.
+The first message should always be the "CONNECT" message, the response of the Ecu determines how the messages are read. E.g.: byte order.
+Otherwise, one must set the address granularity, and max size of the DTOs and CTOs by hand in the contrib config::
+
+    conf.contribs['XCP']['Address_Granularity_Byte'] = 1  # Can be 1, 2 or 4
+    conf.contribs['XCP']['MAX_CTO'] = 8
+    conf.contribs['XCP']['MAX_DTO'] = 8
+
+If you do not want this to be set after receiving the message you can also disable that feature::
+
+    conf.contribs['XCP']['allow_byte_order_change'] = False
+    conf.contribs['XCP']['allow_ag_change'] = False
+    conf.contribs['XCP']['allow_cto_and_dto_change'] = False
+
+To send a pkt over TCP or UDP another header must be used.
+TCP::
+
+    prt1, prt2 = 12345, 54321
+    XCPOnTCP(sport=prt1, dport=prt2) / CTORequest() / Connect()
+
+UDP::
+
+    XCPOnUDP(sport=prt1, dport=prt2) / CTORequest() / Connect()
+
+
+XCPScanner
+---------------
+
+The XCPScanner is a utility to find the CAN identifiers of ECUs that support XCP.
+
+Commandline usage example::
+
+    python -m scapy.tools.automotive.xcpscanner -h
+    Finds XCP slaves using the "GetSlaveId"-message(Broadcast) or the "Connect"-message.
+
+    positional arguments:
+      channel               Linux SocketCAN interface name, e.g.: vcan0
+
+    optional arguments:
+      -h, --help            show this help message and exit
+      --start START, -s START
+                            Start identifier CAN (in hex).
+                            The scan will test ids between --start and --end (inclusive)
+                            Default: 0x00
+      --end END, -e END     End identifier CAN (in hex).
+                            The scan will test ids between --start and --end (inclusive)
+                            Default: 0x7ff
+      --sniff_time', '-t'   Duration in milliseconds a sniff is waiting for a response.
+                            Default: 100
+      --broadcast, -b       Use Broadcast-message GetSlaveId instead of default "Connect"
+                            (GetSlaveId is an optional Message that is not always implemented)
+      --verbose VERBOSE, -v
+                            Display information during scan
+
+        Examples:
+            python3.6 -m scapy.tools.automotive.xcpscanner can0
+            python3.6 -m scapy.tools.automotive.xcpscanner can0 -b 500
+            python3.6 -m scapy.tools.automotive.xcpscanner can0 -s 50 -e 100
+            python3.6 -m scapy.tools.automotive.xcpscanner can0 -b 500 -v
+
+
+Interactive shell usage example::
+    >>> conf.contribs['CANSocket'] = {'use-python-can': False}
+    >>> load_layer("can")
+    >>> load_contrib("automotive.xcp.xcp")
+    >>> sock = CANSocket("vcan0")
+    >>> sock.basecls = XCPOnCAN
+    >>> scanner = XCPOnCANScanner(sock)
+    >>> result = scanner.start_scan()
+
+The result includes the slave_id (the identifier of the Ecu that receives XCP messages),
+and the response_id (the identifier that the Ecu will send XCP messages to).
+
 ISOTP
 =====
 
+ISOTP message
+-------------
+
+Creating an ISOTP message::
+
+   load_contrib('isotp')
+   ISOTP(tx_id=0x241, rx_id=0x641, data=b"\x3eabc")
+
+Creating an ISOTP message with extended addressing::
+
+   ISOTP(tx_id=0x241, rx_id=0x641, rx_ext_address=0x41, data=b"\x3eabc")
+
+Creating an ISOTP message with extended addressing::
+
+   ISOTP(tx_id=0x241, rx_id=0x641, rx_ext_address=0x41, ext_address=0x41, data=b"\x3eabc")
+
+Create CAN-frames from an ISOTP message::
+
+   ISOTP(tx_id=0x241, rx_id=0x641, rx_ext_address=0x41, ext_address=0x55, data=b"\x3eabc" * 10).fragment()
+
+Send ISOTP message over ISOTP socket::
+
+   isoTpSocket = ISOTPSocket('vcan0', tx_id=0x241, rx_id=0x641)
+   isoTpMessage = ISOTP('Message')
+   isoTpSocket.send(isoTpMessage)
+
+Sniff ISOTP message::
+
+   isoTpSocket = ISOTPSocket('vcan0', tx_id=0x641, rx_id=0x241)
+   packets = isoTpSocket.sniff(timeout=0.5)
+
+ISOTP Sockets
+-------------
+
+Scapy provides two kinds of ISOTP-Sockets. One implementation, the ``ISOTPNativeSocket``
+is using the Linux kernel module from Hartkopp. The other implementation, the ``ISOTPSoftSocket``
+is completely implemented in Python. This implementation can be used on Linux,
+Windows, and OSX.
+
+An ``ISOTPSocket`` will not respect ``tx_id, rx_id, rx_ext_address, ext_address`` of an ``ISOTP``
+message object.
+
 System compatibilities
-----------------------
+^^^^^^^^^^^^^^^^^^^^^^
 
 Dependent on your setup, different implementations have to be used.
 
@@ -474,43 +812,86 @@ The decision is made dependent on the configuration ``conf.contribs['ISOTP'] = {
 This will allow you to write platform independent code. Apply this configuration before loading the ISOTP layer
 with ``load_contrib('isotp')``.
 
-Another remark in respect to ISOTPSocket compatibility. Always use with for socket creation. Example::
+Another remark in respect to ISOTPSocket compatibility. Always use ``with`` for
+socket creation. This ensures that ``ISOTPSoftSocket`` objects will get closed
+properly.
+Example::
 
-    with ISOTPSocket("vcan0", did=0x241, sid=0x641) as sock:
+    with ISOTPSocket("vcan0", rx_id=0x241, tx_id=0x641) as sock:
         sock.send(...)
 
+ISOTPNativeSocket
+^^^^^^^^^^^^^^^^^
 
+**Requires:**
 
-ISOTP message
--------------
+* Python3
+* Linux
+* Hartkopp's Linux kernel module: ``https://github.com/hartkopp/can-isotp.git`` (merged into mainline Linux in 5.10)
 
-Creating an ISOTP message::
+During pentests, ISOTPNativeSockets have a better performance and
+reliability, usually. If you are working on Linux, consider this implementation::
 
+   conf.contribs['ISOTP'] = {'use-can-isotp-kernel-module': True}
    load_contrib('isotp')
-   ISOTP(src=0x241, dst=0x641, data=b"\x3eabc")
+   sock = ISOTPSocket("can0", tx_id=0x641, rx_id=0x241)
 
-Creating an ISOTP message with extended addressing::
+Since this implementation is using a standard Linux socket, all Scapy functions
+like ``sniff, sr, sr1, bridge_and_sniff`` work out of the box.
 
-   ISOTP(src=0x241, dst=0x641, exdst=0x41, data=b"\x3eabc")
+For synchronous TX completion, pass ``wait_tx_done=True`` to
+``ISOTPNativeSocket``. Its ``sr1()`` then sends before receiving, so a missing
+Flow Control frame raises ``OSError(errno.ECOMM)`` for the current request even
+when the response timeout is shorter than the kernel FC timer. The default
+receive-side error handling stays unchanged.
 
-Creating an ISOTP message with extended addressing::
+With a native socket configured with ``basecls=UDS``, automotive service
+enumerators can opt into adaptive inter-request pacing::
 
-   ISOTP(src=0x241, dst=0x641, exdst=0x41, exsrc=0x41, data=b"\x3eabc")
+   scanner = UDS_Scanner(
+       sock, test_cases=[UDS_RMBAEnumerator],
+       UDS_RMBARandomEnumerator_kwargs={
+           "adaptive_inter": True,
+           "inter": 0,
+           "adaptive_inter_step": 0.01,
+           "adaptive_inter_max": 0.25,
+           "adaptive_inter_retry": True,
+       })
 
-Create CAN-frames from an ISOTP message::
+This enables native TX completion at a request boundary and increases ``inter``
+after an FC timeout, up to the configured cap. The delay persists for that
+enumerator, including resumed executions and reconnects. The optional retry
+sends the same request once after the increased delay; exhausted transport
+retries produce one unanswered result. Ordinary response timeouts retain their
+retry behaviour and do not increase the delay. Configure RMBA's sequential
+stage separately with ``UDS_RMBASequentialEnumerator_kwargs``. The feature is
+off by default and controls request gaps independently of ISO-TP STmin.
 
-   ISOTP(src=0x241, dst=0x641, exdst=0x41, exsrc=0x55, data=b"\x3eabc" * 10).fragment()
+ISOTPSoftSocket
+^^^^^^^^^^^^^^^
 
-Send ISOTP message over ISOTP socket::
+ISOTPSoftSockets can use any CANSocket. This gives the flexibility to use all
+python-can interfaces. Additionally, these sockets work on Python2 and Python3.
+Usage on Linux with native CANSockets::
 
-   isoTpSocket = ISOTPSocket('vcan0', sid=0x241, did=0x641)
-   isoTpMessage = ISOTP('Message')
-   isoTpSocket.send(isoTpMessage)
+   conf.contribs['ISOTP'] = {'use-can-isotp-kernel-module': False}
+   load_contrib('isotp')
+   with ISOTPSocket("can0", tx_id=0x641, rx_id=0x241) as sock:
+       sock.send(...)
 
-Sniff ISOTP message::
+Usage with python-can CANSockets::
 
-   isoTpSocket = ISOTPSocket('vcan0', sid=0x641, did=0x241)
-   packets = isoTpSocket.sniff(timeout=0.5)
+   conf.contribs['ISOTP'] = {'use-can-isotp-kernel-module': False}
+   conf.contribs['CANSocket'] = {'use-python-can': True}
+   load_contrib('isotp')
+   with ISOTPSocket(CANSocket(bustype='socketcan', channel="can0"), tx_id=0x641, rx_id=0x241) as sock:
+       sock.send(...)
+
+This second example allows the usage of any ``python_can.interface`` object.
+
+**Attention:** The internal implementation of ISOTPSoftSockets requires a background
+thread. In order to be able to close this thread properly, we suggest the use of
+Python's ``with`` statement.
 
 ISOTP MITM attack with bridge and sniff
 ---------------------------------------
@@ -523,15 +904,6 @@ Set up two vcans on Linux terminal::
    sudo ip link set dev vcan0 up
    sudo ip link set dev vcan1 up
 
-Set up ISOTP:
-
-First make sure you installed an iso-tp kernel module.
-
-When the vcan core module is loaded with "sudo modprobe vcan" the iso-tp module can be loaded to the kernel.
-
-Therefore navigate to isotp directory, and load module with "sudo insmod ./net/can/can-isotp.ko". (Tested on Kernel 4.9.135-1-MANJARO)
-
-Detailed instructions you find in https://github.com/hartkopp/can-isotp.
 
 Import modules::
 
@@ -540,10 +912,10 @@ Import modules::
    conf.contribs['ISOTP'] = {'use-can-isotp-kernel-module': True}
    load_contrib('isotp')
 
-Create to ISOTP sockets for attack::
+Create two ISOTP sockets for attack::
 
-   isoTpSocketVCan0 = ISOTPSocket('vcan0', sid=0x241, did=0x641)
-   isoTpSocketVCan1 = ISOTPSocket('vcan1', sid=0x641, did=0x241)
+   isoTpSocketVCan0 = ISOTPSocket('vcan0', tx_id=0x241, rx_id=0x641)
+   isoTpSocketVCan1 = ISOTPSocket('vcan1', tx_id=0x641, rx_id=0x241)
 
 Create function to send packet on vcan0 with threading::
 
@@ -560,8 +932,8 @@ Create function to forward packet::
 Create function to bridge and sniff between two buses::
 
    def bridge():
-       bSocket0 = ISOTPSocket('vcan0', sid=0x641, did=0x241)
-       bSocket1 = ISOTPSocket('vcan1', sid=0x241, did=0x641)
+       bSocket0 = ISOTPSocket('vcan0', tx_id=0x641, rx_id=0x241)
+       bSocket1 = ISOTPSocket('vcan1', tx_id=0x241, rx_id=0x641)
        bridge_and_sniff(if1=bSocket0, if2=bSocket1, xfrm12=forwarding, xfrm21=forwarding, timeout=1)
        bSocket0.close()
        bSocket1.close()
@@ -571,7 +943,7 @@ Create threads for sending packet and to bridge and sniff::
    threadBridge = threading.Thread(target=bridge)
    threadSender = threading.Thread(target=sendPacketWithISOTPSocket)
 
-Start threads are based on Linux kernel modules. The python-can project is used to support CAN and CANSockets on other systems, besides Linux. This guide explains the hardware setup on a BeagleBone Black. The BeagleBone Black was chosen because of its two CAN interfaces on the main processor. The presence of two CAN interfaces in one device gives the possibility of CAN MITM attacks and session hijacking. The Cannelloni framework turns a BeagleBone Black into a CAN-to-UDP interface, which gives you the freedom to run Scapy on a more powerful machine.::
+Start threads::
 
    threadBridge.start()
    threadSender.start()
@@ -585,66 +957,11 @@ Close sockets::
    isoTpSocketVCan0.close()
    isoTpSocketVCan1.close()
 
-An ISOTPSocket will not respect ``src, dst, exdst, exsrc`` of an ISOTP message object.
 
-ISOTP Sockets
-=============
+isotp_scan and ISOTPScanner
+---------------------------
 
-Scapy provides two kinds of ISOTP Sockets. One implementation, the ISOTPNativeSocket
-is using the Linux kernel module from Hartkopp. The other implementation, the ISOTPSoftSocket
-is completely implemented in Python. This implementation can be used on Linux,
-Windows, and OSX.
-
-ISOTPNativeSocket
------------------
-
-**Requires:**
-
-* Python3
-* Linux
-* Hartkopp's Linux kernel module: ``https://github.com/hartkopp/can-isotp.git``
-
-During pentests, the ISOTPNativeSockets has a better performance and
-reliability, usually. If you are working on Linux, consider this implementation::
-
-   conf.contribs['ISOTP'] = {'use-can-isotp-kernel-module': True}
-   load_contrib('isotp')
-   sock = ISOTPSocket("can0", sid=0x641, did=0x241)
-
-Since this implementation is using a standard Linux socket, all Scapy functions
-like ``sniff, sr, sr1, bridge_and_sniff`` work out of the box.
-
-ISOTPSoftSocket
----------------
-
-ISOTPSoftSockets can use any CANSocket. This gives the flexibility to use all
-python-can interfaces. Additionally, these sockets work on Python2 and Python3.
-Usage on Linux with native CANSockets::
-
-   conf.contribs['ISOTP'] = {'use-can-isotp-kernel-module': False}
-   load_contrib('isotp')
-   with ISOTPSocket("can0", sid=0x641, did=0x241) as sock:
-       sock.send(...)
-
-Usage with python-can CANSockets::
-
-   conf.contribs['ISOTP'] = {'use-can-isotp-kernel-module': False}
-   conf.contribs['CANSocket'] = {'use-python-can': True}
-   load_contrib('isotp')
-   with ISOTPSocket(CANSocket(bustype='socketcan', channel="can0"), sid=0x641, did=0x241) as sock:
-       sock.send(...)
-
-This second example allows the usage of any ``python_can.interface`` object.
-
-**Attention:** The internal implementation of ISOTPSoftSockets requires a background
-thread. In order to be able to close this thread properly, we suggest the use of
-Pythons ``with`` statement.
-
-
-ISOTPScan and ISOTPScanner
---------------------------
-
-ISOTPScan is a utility function to find ISOTP-Endpoints on a CAN-Bus.
+isotp_scan is a utility function to find ISOTP-Endpoints on a CAN-Bus.
 ISOTPScanner is a commandline-utility for the identical function.
 
 .. image:: ../graphics/animations/animation-scapy-isotpscan.svg
@@ -700,7 +1017,7 @@ Interactive shell usage example::
     >>> conf.contribs['CANSocket'] = {'use-python-can': False}
     >>> load_contrib('cansocket')
     >>> load_contrib('isotp')
-    >>> socks = ISOTPScan(CANSocket("vcan0"), range(0x700, 0x7ff), can_interface="vcan0")
+    >>> socks = isotp_scan(CANSocket("vcan0"), range(0x700, 0x800), can_interface="vcan0")
     >>> socks
     [<<ISOTPNativeSocket: read/write packets at a given CAN interface using CAN_ISOTP socket > at 0x7f98e27c8210>,
      <<ISOTPNativeSocket: read/write packets at a given CAN interface using CAN_ISOTP socket > at 0x7f98f9079cd0>,
@@ -709,12 +1026,10 @@ Interactive shell usage example::
      <<ISOTPNativeSocket: read/write packets at a given CAN interface using CAN_ISOTP socket > at 0x7f98f912e950>,
      <<ISOTPNativeSocket: read/write packets at a given CAN interface using CAN_ISOTP socket > at 0x7f98f906c0d0>]
 
-
-
 UDS
 ===
 
-The main usage of UDS is flashing and diagnostic of an ECU. UDS is an
+The main usage of UDS is flashing and diagnostics of an Ecu. UDS is an
 application layer protocol and can be used as a DoIP or HSFZ payload or a UDS packet
 can directly be sent over an ISOTPSocket. Every OEM has its own customization of UDS.
 This increases the difficulty of generic applications and OEM specific knowledge is
@@ -733,9 +1048,9 @@ Customization of UDS_RDBI, UDS_WDBI
 -----------------------------------
 
 In real-world use-cases, the UDS layer is heavily customized. OEMs define their own substructure of packets.
-Especially the packets ReadDataByIdentifier or WriteDataByIdentifier have a very OEM or even ECU specific
+Especially the packets ReadDataByIdentifier or WriteDataByIdentifier have a very OEM or even Ecu specific
 substructure. Therefore a ``StrField`` ``dataRecord`` is not added to the ``field_desc``.
-The intended usage is to create ECU or OEM specific description files, which extend the general UDS layer of
+The intended usage is to create Ecu or OEM specific description files, which extend the general UDS layer of
 Scapy with further protocol implementations.
 
 Customization example::
@@ -769,7 +1084,8 @@ Customization example::
 
     UDS_RDBI.dataIdentifiers[0x172b] = 'GatewayIP'
 
-If one wants to work with this custom additions, these can be loaded at runtime to the Scapy interpreter::
+If one wants to work with these custom additions, these can be loaded at runtime
+to the Scapy interpreter::
 
     >>> load_contrib('automotive.uds')
     >>> load_contrib('automotive.OEM-XYZ.car-model-xyz')
@@ -793,10 +1109,103 @@ If one wants to work with this custom additions, these can be loaded at runtime 
 
 .. image:: ../graphics/animations/animation-scapy-uds3.svg
 
+
+Single Layer Mode
+-----------------
+
+UDS, KWP, OBD, and GMLAN all support a *single layer mode* that makes each
+service packet a standalone ``Packet`` rather than a nested sublayer.
+
+**Default (multi-layer) mode**
+
+.. code-block:: python
+
+    >>> pkt = UDS() / UDS_DSC(diagnosticSessionType=0x01)
+    >>> UDS(b'\x10\x01')
+    <UDS  service=DiagnosticSessionControl |<UDS_DSC  diagnosticSessionType=defaultSession |>>
+
+**Single layer mode**
+
+To enable before loading a module::
+
+    >>> conf.contribs['UDS'] = {'treat-response-pending-as-answer': False,
+    ...                          'single_layer_mode': True}
+    >>> load_contrib('automotive.uds')
+
+To toggle at runtime after loading::
+
+    >>> conf.contribs['UDS']['single_layer_mode'] = True
+    >>> UDS(b'\x10\x01')
+    <UDS_DSC  service=DiagnosticSessionControl diagnosticSessionType=defaultSession |>
+    >>> bytes(UDS_DSC(diagnosticSessionType=0x01))
+    b'\x10\x01'
+    >>> conf.contribs['UDS']['single_layer_mode'] = False   # revert to multi-layer mode
+
+The same ``single_layer_mode`` key works for all protocols: replace ``'UDS'``
+with ``'KWP'``, ``'OBD'``, or ``'GMLAN'`` as appropriate.
+
+Compatibility Mode
+------------------
+
+Scapy allows crafting packets freely, including stacking a service sub-packet
+on top of the base protocol layer (e.g. ``UDS()/UDS_DSC()``).  When both
+``single_layer_mode`` *and* stacking are used together, the ``service`` byte
+would normally appear twice in the resulting byte stream – once from the base
+layer and once from the sub-packet's own ``service`` ConditionalField.
+
+The **compatibility mode** flag (``compatibility_mode``, default ``True``)
+addresses this: when it is enabled and ``single_layer_mode`` is active, the
+sub-packet's ``service`` field is automatically **suppressed** whenever the
+immediate underlayer is already the matching base-protocol packet.
+
+.. list-table:: Behaviour matrix
+   :header-rows: 1
+   :widths: 25 25 50
+
+   * - ``single_layer_mode``
+     - ``compatibility_mode``
+     - ``UDS()/UDS_DSC()`` byte layout
+   * - ``False``
+     - any
+     - ``service`` (UDS) + ``diagnosticSessionType`` (UDS_DSC)
+   * - ``True``
+     - ``True`` *(default)*
+     - ``service`` (UDS) + ``diagnosticSessionType`` (UDS_DSC) — duplicate suppressed
+   * - ``True``
+     - ``False``
+     - ``service`` (UDS) + ``service`` (UDS_DSC) + ``diagnosticSessionType`` (UDS_DSC)
+
+Example with compatibility mode on (default)::
+
+    >>> conf.contribs['UDS']['single_layer_mode'] = True
+    >>> conf.contribs['UDS']['compatibility_mode'] = True  # already the default
+
+    >>> # Standalone sub-packet: service field IS present (no UDS underlayer)
+    >>> bytes(UDS_DSC(diagnosticSessionType=0x01))
+    b'\x10\x01'
+
+    >>> # Stacked: service field in UDS_DSC is suppressed (UDS is the underlayer)
+    >>> bytes(UDS() / UDS_DSC(diagnosticSessionType=0x01))
+    b'\x10\x01'
+
+Example with compatibility mode off::
+
+    >>> conf.contribs['UDS']['compatibility_mode'] = False
+
+    >>> # Stacked: both UDS and UDS_DSC emit a service byte
+    >>> bytes(UDS() / UDS_DSC(diagnosticSessionType=0x01))
+    b'\x10\x10\x01'
+
+    >>> conf.contribs['UDS']['compatibility_mode'] = True   # restore default
+
+The same ``compatibility_mode`` key works for all protocols: replace ``'UDS'``
+with ``'KWP'``, ``'OBD'``, or ``'GMLAN'`` as appropriate.
+
 GMLAN
 =====
-GMLAN is very similar to UDS. It's GMs application layer protocol for
-flashing, calibration and diagnostic of their cars.
+
+GMLAN is very similar to UDS. It's GM’s application layer protocol for
+flashing, calibration and diagnostics of their cars.
 Use the argument ``basecls=GMLAN`` on the ``init`` function of an ISOTPSocket.
 
 Usage example:
@@ -804,47 +1213,52 @@ Usage example:
 .. image:: ../graphics/animations/animation-scapy-gmlan.svg
 
 
-ECU Utility examples
+Ecu Utility examples
 ====================
 
-The ECU utility can be used to analyze the internal states of an ECU under investigation.
+The Ecu utility can be used to analyze the internal states of an Ecu under investigation.
 This utility depends heavily on the support of the used protocol. ``UDS`` is supported.
 
-Log all commands applied to an ECU
+Log all commands applied to an Ecu
 ----------------------------------
 
-This example shows the logging mechanism of an ECU object. The log of an ECU is a dictionary of applied UDS commands. The key for this dictionary is the UDS service name. The value consists of a list of tuples, containing a timestamp and a log value
+This example shows the logging mechanism of an Ecu object. The log of an Ecu
+is a dictionary of applied UDS commands. The key for this dictionary is the
+UDS service name. The value consists of a list of tuples, containing a timestamp
+and a log value
 
 Usage example::
 
-    ecu = ECU(verbose=False, store_supported_responses=False)
+    ecu = Ecu(verbose=False, store_supported_responses=False)
     ecu.update(PacketList(msgs))
     print(ecu.log)
     timestamp, value = ecu.log["DiagnosticSessionControl"][0]
 
 
 
-Trace all commands applied to an ECU
+Trace all commands applied to an Ecu
 ------------------------------------
 
-This example shows the trace mechanism of an ECU object. Traces of the current state of the ECU object and the received message are printed on stdout. Some messages, depending on the protocol, will change the internal state of the ECU.
+This example shows the trace mechanism of an Ecu object. Traces of the current
+state of the Ecu object and the received message are printed on stdout.
+Some messages, depending on the protocol, will change the internal state of the Ecu.
 
 Usage example::
 
-    ecu = ECU(verbose=True, logging=False, store_supported_responses=False)
+    ecu = Ecu(verbose=True, logging=False, store_supported_responses=False)
     ecu.update(PacketList(msgs))
     print(ecu.current_session)
 
 
 
-Generate supported responses of an ECU
+Generate supported responses of an Ecu
 --------------------------------------
 
-This example shows a mechanism to clone a real world ECU by analyzing a list of Packets.
+This example shows a mechanism to clone a real world Ecu by analyzing a list of Packets.
 
 Usage example::
 
-    ecu = ECU(verbose=False, logging=False, store_supported_responses=True)
+    ecu = Ecu(verbose=False, logging=False, store_supported_responses=True)
     ecu.update(PacketList(msgs))
     supported_responses = ecu.supported_responses
     unanswered_packets = ecu.unanswered_packets
@@ -856,15 +1270,18 @@ Usage example::
 Analyze multiple UDS messages
 -----------------------------
 
-This example shows how to load ``UDS`` messages from a ``.pcap`` file containing ``CAN`` messages. A ``PcapReader`` object is used as socket and an ``ISOTPSession`` parses ``CAN`` frames to ``ISOTP`` frames which are then casted to ``UDS`` objects through the ``basecls`` parameter
+This example shows how to load ``UDS`` messages from a ``.pcap`` file containing
+``CAN`` messages. A ``PcapReader`` object is used as socket and an
+``ISOTPSession`` parses ``CAN`` frames to ``ISOTP`` frames which are
+then cast to ``UDS`` objects through the ``basecls`` parameter
 
 Usage example::
 
     with PcapReader("test/contrib/automotive/ecu_trace.pcap") as sock:
-        udsmsgs = sniff(session=ISOTPSession, session_kwargs={"use_ext_addr":False, "basecls":UDS}, count=50, opened_socket=sock)
+        udsmsgs = sniff(session=ISOTPSession(use_ext_addr=False, basecls=UDS), count=50, opened_socket=sock)
 
 
-    ecu = ECU()
+    ecu = Ecu()
     ecu.update(udsmsgs)
     print(ecu.log)
     print(ecu.supported_responses)
@@ -872,17 +1289,21 @@ Usage example::
 
 
 
-Analyze on the fly with ECUSession
+Analyze on the fly with EcuSession
 ----------------------------------
 
-This example shows the usage of an ECUSession in sniff. An ISOTPSocket or any socket like object which returns entire messages of the right protocol can be used. An ``ECUSession`` is used as supersession in an ``ISOTPSession``. To obtain the ``ECU`` object from an ``ECUSession``, the ``ECUSession`` has to be created outside of sniff.
+This example shows the usage of an EcuSession in sniff. An ISOTPSocket or any
+socket like object which returns entire messages of the right protocol can be
+used. An ``EcuSession`` is used as supersession in an ``ISOTPSession``.
+To obtain the ``Ecu`` object from an ``EcuSession``, the ``EcuSession``
+has to be created outside of sniff.
 
 Usage example::
 
-    session = ECUSession()
+    session = EcuSession()
 
     with PcapReader("test/contrib/automotive/ecu_trace.pcap") as sock:
-        udsmsgs = sniff(session=ISOTPSession, session_kwargs={"supersession": session, "use_ext_addr":False, "basecls":UDS}, count=50, opened_socket=sock)
+        udsmsgs = sniff(session=ISOTPSession(use_ext_addr=False, basecls=UDS, supersession=session)), count=50, opened_socket=sock)
 
     ecu = session.ecu
     print(ecu.log)
@@ -896,22 +1317,25 @@ SOME/IP and SOME/IP SD messages
 Creating a SOME/IP message
 --------------------------
 
-This example shows a SOME/IP message which requests a service 0x1234 with the method 0x421. Different types of SOME/IP messages follow the same procedure and their specifications can be seen here ``http://www.some-ip.com/papers/cache/AUTOSAR_TR_SomeIpExample_4.2.1.pdf``.
+This example shows a SOME/IP message which requests a service 0x1234 with the
+method 0x421. Different types of SOME/IP messages follow the same procedure
+and their specifications can be seen here
+``http://www.some-ip.com/papers/cache/AUTOSAR_TR_SomeIpExample_4.2.1.pdf``.
 
 
 Load the contribution::
 
    load_contrib('automotive.someip')
 
-Create UDP package::
+Create UDP packet::
 
    u = UDP(sport=30509, dport=30509)
 
-Create IP package::
+Create IP packet::
 
    i = IP(src="192.168.0.13", dst="192.168.0.10")
 
-Create SOME/IP package::
+Create SOME/IP packet::
 
    sip = SOMEIP()
    sip.iface_ver = 0
@@ -940,13 +1364,13 @@ Load the contribution::
 
    load_contrib('automotive.someip')
 
-Create UDP package::
+Create UDP packet::
 
    u = UDP(sport=30490, dport=30490)
 
 The UDP port must be the one which was chosen for the SOME/IP SD transmission.
 
-Create IP package::
+Create IP packet::
 
    i = IP(src="192.168.0.13", dst="224.224.224.245")
 
@@ -971,7 +1395,7 @@ Create the options array input::
 
 l4_proto defines the protocol for the communication with the endpoint, UDP in this case.
 
-Create the SD package and put in the inputs::
+Create the SD packet and put in the inputs::
 
    sd = SD()
    sd.set_entryArray(ea)
@@ -986,10 +1410,7 @@ Stack it and send it::
 OBD
 ===
 
-OBD message
------------
-
-OBD is implemented on top of ISOTP. Use an ISOTPSocket for the communication with an ECU. 
+OBD is implemented on top of ISOTP. Use an ISOTPSocket for the communication with an Ecu.
 You should set the parameters ``basecls=OBD`` and ``padding=True`` in your ISOTPSocket init call.
 
 OBD is split into different service groups. Here are some example requests:
@@ -1011,8 +1432,9 @@ The response will contain a PacketListField, called `data_records`. This field c
          |###[ PID_00_PIDsSupported ]###
          |     supported_pids= PID20+PID1F+PID1C+PID15+PID14+PID13+PID11+PID10+PID0F+PID0E+PID0D+PID0C+PID0B+PID0A+PID07+PID06+PID05+PID04+PID03+PID01
 
-Let's assume our ECU under test supports the pid 0x15::
-   
+
+Let's assume our Ecu under test supports the pid 0x15::
+
    req = OBD()/OBD_S01(pid=[0x15])
    resp = sock.sr1(req)
    resp.show()
@@ -1037,7 +1459,7 @@ Service 08 supports Test Identifiers (tid).
 Service 09 supports Information Identifiers (iid).
 
 Examples:
-^^^^^^^^^
+---------
 
 Request supported Information Identifiers::
 
@@ -1062,236 +1484,456 @@ Request the Vehicle Identification Number (VIN)::
 .. image:: ../graphics/animations/animation-scapy-obd.svg
 
 
-Test-Setup Tutorials
-====================
+Message Authentication (AUTOSAR SecOC)
+======================================
 
-Hardware Setup
+AUTOSAR SecOC is a security architecture protecting communication between ECUs in a vehicle from cyber-attacks.
+
+- **Module**: AUTOSAR
+- **Functions**: Provides message integrity and authentication
+- **Protection**: Freshness value to counter replay attacks
+- **Cryptography**: Supports asymmetric and symmetric methods
+- **Key Distribution**: Not specified
+- **Unique Identifiers**: Every PDU has a SecOCDataID
+  - **CAN Networks**: Uses CAN identifier
+  - **Ethernet Networks**: Uses PDU identifier or mappings to SecOCDataIDs
+
+.. figure:: ../graphics/automotive/autosar1.png
+   :alt: Overview SecOC. Author: AUTOSAR
+
+Generation
+----------
+
+- Secured I-PDU includes freshness value and MAC
+- Freshness value increments on every transmit or derived from a tick count
+- MAC generation uses SecOCDataID, PDU, and freshness value
+- In symmetric mode, MAC bits can be truncated, reducing security
+
+Truncation
+----------
+
+.. figure:: ../graphics/automotive/autosar2.png
+   :alt: Secured I-PDU contents with truncated Freshness Counter and truncated Authenticator. Author: AUTOSAR
+
+- MAC and freshness value are transferred in truncated format to save bandwidth
+
+Verification
+------------
+
+- Only LSBs of the freshness value are transmitted
+- Compute full freshness value internally
+  - Overwrite LSBs of the last received value
+  - Increment MSBs if received LSBs are smaller than the last LSBs
+- Calculate MAC from PDU and full freshness count
+- Accept PDU if calculated and transmitted MACs match, otherwise reject
+
+Profiles
+--------
+
+AUTOSAR specifies three profiles for truncated freshness value and MAC sizes. All use CMAC with AES128:
+
+- **Profile 1 (24Bit-CMAC-8Bit-FV)**
+  - Algorithm: CMAC/AES-128
+  - Freshness value: 8 bits
+  - MAC: 24 bits
+
+- **Profile 2 (24Bit-CMAC-No-FV)**
+  - Algorithm: CMAC/AES-128
+  - Freshness value: 0 bits
+  - MAC: 24 bits
+  - No freshness values used
+
+- **Profile 3 (JASPAR)**
+  - Algorithm: CMAC/AES-128
+  - Freshness value: 64 bits
+  - Truncated Freshness value: 4 bits
+  - MAC: 28 bits
+
+Freshness Value
+---------------
+
+Protects against replay attacks. AUTOSAR recommends a structure for the freshness value, commonly distributed via authenticated PDUs.
+
+.. figure:: ../graphics/automotive/autosar3.png
+   :alt: Structure of FreshnessValue. Author: AUTOSAR
+
+Sync Message
+------------
+
+Synchronizes the 'Trip Counter' and 'Reset Counter' across all ECUs to maintain a consistent freshness value.
+
+- Sync message sent when 'Message Counter' overflows
+- Security recommendation: Use broadcast or multicast to prevent DoS attacks
+
+.. figure:: ../graphics/automotive/autosar4.png
+   :alt: Format of the synchronization message (TripResetSyncMsg). Author: AUTOSAR
+
+SecOC in Scapy
+==============
+
+Scapy supports the dissection, building, verification, and authentication of SecOC messages sent via AUTOSAR PDUs or CANFD packets. The implementation is designed to be vendor-independent and easily customizable, addressing common challenges such as handling freshness values and differentiating between SecOC and non-SecOC PDUs.
+
+General Implementation Difficulties
+-----------------------------------
+
+Implementing SecOC in Scapy involves several challenges:
+
+- **Vendor-Specific Implementations**: Different Original Equipment Manufacturers (OEMs) define their own standards for implementing SecOC, requiring the Scapy implementation to be flexible and adaptable.
+- **Freshness Value Tracking**: Freshness values need to be tracked accurately to ensure proper message authentication and to prevent replay attacks.
+- **SecOCDataID Management**: The SecOCDataID, which uniquely identifies each PDU, must be known and managed correctly.
+- **Mix of SecOC and Non-SecOC PDUs**: SecOC PDUs are mixed with non-SecOC PDUs, and the only difference is their identifier. Proper identification and handling are crucial for correct processing.
+
+Customization
+-------------
+
+Scapy SecOC Packets provide three stub functions that need to be customized to handle SecOC properly:
+
+.. code-block:: python
+
+   class My_SecOC_CANFD(SecOC_CANFD):
+
+       def get_secoc_payload(self) -> bytes:
+           """
+           This method retrieves the payload, including the SecOCDataID,
+           which is used for MAC computation.
+           """
+           secoc_data_id = self.identifier  # CANFD identifier
+           payload = self.pdu_payload
+           return bytes(secoc_data_id) + bytes(payload)
+
+       def get_secoc_key(self) -> bytes:
+           """
+           This method provides the secret key for the specified SecOCDataID.
+           """
+           secoc_data_id = self.identifier
+           secoc_key = GLOBAL_KEYS[secoc_data_id]
+           return secoc_key
+
+       def get_secoc_freshness_value(self) -> bytes:
+           """
+           This method provides the full freshness value required for MAC computation.
+           """
+           freshness_value = trip_count + reset_counter + message_count + self.tfv
+           return bytes(freshness_value)
+
+Preparation
+-----------
+
+To properly dissect SecOC and non-SecOC AUTOSAR PDUs or CANFD frames, SecOC PDUs need to be registered. This registration informs the dissector whether to use SecOC variants or non-SecOC variants of the packet for dissection.
+
+.. code-block:: python
+
+   My_SecOC_CANFD.register_secoc_protected_pdu(pdu_id=0x123)
+
+   socket = CANSocket("vcan0", fd=True, basecls=My_SecOC_CANFD)
+
+The above code registers the PDU with identifier `0x123` as a SecOC_CANFD packet. All other packets will be interpreted as regular CANFD packets.
+
+Working with SecOC
+------------------
+
+Once you have obtained a SecOC packet from a socket or a PCAP file, you can use the SecOC-related functions to handle authentication and verification.
+
+.. code-block:: python
+
+   # Suppose this is our SecOC packet
+   pkt: My_SecOC_CANFD
+
+   # A call to secoc_authenticate will update the truncated freshness value and the truncated MAC of the packet
+   pkt.secoc_authenticate()
+
+   # The truncated freshness value and MAC are now updated
+   print(pkt.tfv)  # Updated truncated freshness value
+   print(pkt.tmac)  # Updated truncated MAC
+
+   # A call to secoc_verify will compute the MAC from the payload of the packet and the local freshness value,
+   # then compare it with the truncated MAC of the packet.
+   if pkt.secoc_verify():
+       print("Message verified")
+
+
+
+Simulating ECUs and Security Functions
+=======================================
+
+
+Modeling an ECU as an Automaton
+-------------------------------
+
+To begin, we need to power cycle our simulated ECU by creating a simple automaton with two states: ON and OFF.
+Before building the actual ECU automaton, we require a power supply interface.
+
+Power Supply
+------------
+
+The power supply object serves as the interface to power cycle our ECU automaton. It enables communication between the
+automaton and the power supply to accurately simulate the ECU's power consumption.
+For multiprocessing support, file descriptors and multiprocessing Values are used. Here’s how to set it up:
+
+.. code-block:: python
+
+    import logging
+    import sys
+    from multiprocessing import Value, Pipe
+    from multiprocessing.sharedctypes import Synchronized
+
+    logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+
+    class AutomatonPowerSupply():
+        def __init__(self) -> None:
+            super().__init__()
+            self.logger = logging.getLogger("AutomatonPowerSupply")
+            self.logger.info("Init done")
+            self.voltage_on: Synchronized[int] = Value("i", 0)
+            self.current_noise: Synchronized[int] = Value("i", 0)
+            self.current_on: Synchronized[int] = Value("i", 0)
+            self.delay_off = 0.001
+            self.delay_on = 0.001
+            self.read_pipe, self.write_pipe = Pipe()
+            self.closed = False
+
+        def on(self) -> None:
+            self.logger.debug("ON")
+            with self.voltage_on.get_lock():
+                self.voltage_on.value = 12
+            self.write_pipe.send(b"1")
+
+        def off(self) -> None:
+            self.logger.debug("OFF")
+            with self.voltage_on.get_lock():
+                self.voltage_on.value = 0
+            self.write_pipe.send(b"0")
+
+        def close(self) -> None:
+            if self.closed:
+                return
+            self.closed = True
+            self.read_pipe.close()
+            self.write_pipe.close()
+
+        def reset(self) -> None:
+            self.off()
+            time.sleep(self.delay_off)
+            self.on()
+            time.sleep(self.delay_on)
+
+This code establishes the power supply, enabling it to control the power state of the ECU automaton.
+The `on`, `off`, and `reset` methods manage state transitions, while `Pipe` and `Value` ensure inter-process
+communication and synchronization. This setup guarantees accurate modeling and control of the ECU's power
+consumption within a multiprocessing environment.
+
+ECU Automaton
+-------------
+
+Now that we have a power supply, we can start modeling our ECU automaton, which can be turned on and off.
+
+.. code-block:: python
+
+    from typing import Optional, List, IO, Type, Any
+    from scapy.automaton import Automaton, ATMT
+
+    class EcuAutomaton(Automaton):
+        def __init__(self, *args: Any, power_supply: AutomatonPowerSupply, **kargs: Any) -> None:
+            self.power_supply = power_supply
+            super().__init__(*args,
+                             external_fd={"power_supply_fd": self.power_supply.read_pipe.fileno()},
+                             **kargs)
+
+        @ATMT.state(initial=1)  # type: ignore
+        def ECU_OFF(self) -> None:
+            pass
+
+        @ATMT.state()  # type: ignore
+        def ECU_ON(self) -> None:
+            pass
+
+        # ====== POWER HANDLING ==========
+        @ATMT.ioevent(ECU_OFF, name="power_supply_fd")  # type: ignore
+        def event_voltage_changed_on(self, fd: IO[bytes]) -> None:
+            new_voltage = fd.read(1)
+            if new_voltage == b"1":
+                raise self.ECU_ON()
+
+        @ATMT.ioevent(ECU_ON, name="power_supply_fd")  # type: ignore
+        def event_voltage_changed_off(self, fd: IO[bytes]) -> None:
+            new_voltage = fd.read(1)
+            if new_voltage == b"0":
+                raise self.ECU_OFF()
+
+        @ATMT.action(event_voltage_changed_on)  # type: ignore
+        def action_consumption_on(self) -> None:
+            self.debug(1, "Consuming energy ON")
+            with self.power_supply.current_on.get_lock():
+                self.power_supply.current_on.value = 1
+
+        @ATMT.action(event_voltage_changed_off)  # type: ignore
+        def action_consumption_off(self) -> None:
+            self.debug(1, "Consuming energy OFF")
+            with self.power_supply.current_on.get_lock():
+                self.power_supply.current_on.value = 0
+
+This code defines an `EcuAutomaton` class that models an ECU with two states: ON and OFF. It uses Scapy's automaton
+framework to handle the state transitions based on the power supply's status. The `event_voltage_changed_on` and
+`event_voltage_changed_off` methods listen for voltage changes to switch states, while `action_consumption_on` and
+`action_consumption_off` manage the power consumption behavior. This setup allows for a robust simulation of an ECU's
+power cycling behavior.
+
+Let's give it a shot:
+
+.. code-block:: python
+
+    import threading
+    import time
+    from scapy.contrib.cansocket import NativeCANSocket
+    from scapy.error import log_runtime
+
+    ps = AutomatonPowerSupply()
+    cs = NativeCANSocket("vcan0")
+    automaton = EcuAutomaton(debug=1, power_supply=ps, sock=cs)
+    automaton.runbg()
+
+    ps.on()
+    time.sleep(0.1)
+    print(f"Current consumption {ps.current_on.value}")
+    ps.off()
+    time.sleep(0.1)
+    print(f"Current consumption {ps.current_on.value}")
+
+    automaton.stop()
+
+This code sets up and tests our ECU automaton. We import the necessary modules and initialize the power supply and
+CAN socket. We then create an instance of `EcuAutomaton` with debugging enabled, and run it in the background.
+
+We power on the ECU and wait a bit to let it stabilize. Then, we print the current consumption, turn off the power,
+wait again, and print the current consumption once more. Finally, we stop the automaton.
+
+By running this code, you should see the current consumption values change as the ECU powers on and off, demonstrating
+our automaton in action.
+
+Simulating UDS
 --------------
 
-Beagle Bone Black Operating System Setup
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Next up, we want to communicate with our automaton over UDS (Unified Diagnostic Services), aiming to implement
+complex state machines like Security Access. Let's start with a simpler example. The following function allows
+us to receive and send packets from the automaton's socket, as provided in the `init` function.
 
-#. | **Download an Image**
-   | The latest Debian Linux image can be found at the website
-   | ``https://beagleboard.org/latest-images``. Choose the BeagleBone
-     Black IoT version and download it.
+.. code-block:: python
 
-   ::
+    class EcuAutomaton(Automaton):
 
-       wget https://debian.beagleboard.org/images/bone-debian-8.7\
-       -iot-armhf-2017-03-19-4gb.img.xz
+        # Existing states and transitions
 
+        @ATMT.receive_condition(ECU_ON)  # type: ignore
+        def on_pkt_on_received_ON(self, pkt: Packet) -> None:
+            response = None
+            if pkt:
+                if response := self.get_default_uds_response(pkt):
+                    self.my_send(response)
 
-   After the download, copy it to an SD-Card with minimum of 4 GB storage.
+        def get_default_uds_response(self, pkt: Packet) -> Optional[Packet]:
+            service = bytes(pkt)[0]
+            length = len(pkt)
+            sub_function = bytes(pkt)[1] if length > 1 else None
+            match service, length, sub_function:
+                case 0x10, 2, 1:
+                    return UDS() / UDS_DSCPR(b"\x01")
+                case 0x3E, 2, 0:
+                    return UDS() / UDS_TPPR()
+                case 0x3E, 2, 0x80:
+                    return None
+                case 0x3E, 2, _:
+                    return UDS() / UDS_NR(requestServiceId=service,
+                                          negativeResponseCode="subFunctionNotSupported")
+                case 0x3E, _, _:
+                    return UDS() / UDS_NR(requestServiceId=service,
+                                          negativeResponseCode="incorrectMessageLengthOrInvalidFormat")
+                case 0x27, _, _:
+                    return UDS() / UDS_NR(requestServiceId=service,
+                                          negativeResponseCode="incorrectMessageLengthOrInvalidFormat")
+                case _:
+                    return UDS() / UDS_NR(requestServiceId=service, negativeResponseCode="serviceNotSupported")
 
-   ::
+By using Python's match-case operator, we can craft a very elegant UDS answering machine. ECUs are usually precise
+with their negative response codes, and modeling this becomes straightforward with the match operator. For instance,
+consider the TesterPresent case. If we receive the correct service, length, and sub-function, we respond positively.
+If the sub-function is anything else, we fall through to the negative response case "subFunctionNotSupported". If the
+length is incorrect, we return "incorrectMessageLengthOrInvalidFormat". Finally, if the service is unknown, the
+function returns "serviceNotSupported". This approach allows us to handle UDS communication effectively and implement
+the necessary logic for our ECU automaton.
 
-       xzcat bone-debian-8.7-iot-armhf-2017-03-19-4gb.img.xz | \
-       sudo dd of=/dev/xvdj
+Full example:
 
+.. code-block:: python
 
-#. | **Enable WiFi**
-   | USB-WiFi dongles are well supported by Debian Linux. Login over SSH
-     on the BBB and add the WiFi network credentials to the file
-     ``/var/lib/connman/wifi.config``. If a USB-WiFi dongle is not
-     available, it is also possible to share the host's internet
-     connection with the Ethernet connection of the BBB emulated over
-     USB. A tutorial to share the host network connection can be found
-     on this page:
-   | ``https://elementztechblog.wordpress.com/2014/12/22/sharing-internet -using-network-over-usb-in-beaglebone-black/``.
-   | Login as root onto the BBB:
+    from typing import Optional, List, IO, Type, Any
+    from scapy.packet import Packet
+    from scapy.automaton import ATMT, Automaton
+    from scapy.contrib.automotive.uds import *
+    from scapy.contrib.isotp import *
 
-   ::
+    class EcuAutomaton(Automaton):
+        def __init__(self, *args: Any, power_supply: AutomatonPowerSupply, **kargs: Any) -> None:
+            self.power_supply = power_supply
+            super().__init__(*args,
+                             external_fd={"power_supply_fd": self.power_supply.read_pipe.fileno()},
+                             **kargs)
 
-       ssh debian@192.168.7.2
-       sudo su
+        @ATMT.state(initial=1)  # type: ignore
+        def ECU_OFF(self) -> None:
+            pass
 
+        @ATMT.state()  # type: ignore
+        def ECU_ON(self) -> None:
+            pass
 
-   Provide the WiFi login credentials to connman:
+        # ====== POWER HANDLING ==========
+        @ATMT.ioevent(ECU_OFF, name="power_supply_fd")  # type: ignore
+        def event_voltage_changed_on(self, fd: IO[bytes]) -> None:
+            new_voltage = fd.read(1)
+            if new_voltage == b"1":
+                raise self.ECU_ON()
 
-   ::
+        @ATMT.ioevent(ECU_ON, name="power_supply_fd")  # type: ignore
+        def event_voltage_changed_off(self, fd: IO[bytes]) -> None:
+            new_voltage = fd.read(1)
+            if new_voltage == b"0":
+                raise self.ECU_OFF()
 
-       echo "[service_home]
-       Type = wifi
-       Name = ssid
-       Security = wpa
-       Passphrase = xxxxxxxxxxxxx" \
-       > /var/lib/connman/wifi.config
+        @ATMT.action(event_voltage_changed_on)  # type: ignore
+        def action_consumption_on(self) -> None:
+            self.debug(1, "Consuming energy ON")
+            with self.power_supply.current_on.get_lock():
+                self.power_supply.current_on.value = 1
 
+        @ATMT.action(event_voltage_changed_off)  # type: ignore
+        def action_consumption_off(self) -> None:
+            self.debug(1, "Consuming energy OFF")
+            with self.power_supply.current_on.get_lock():
+                self.power_supply.current_on.value = 0
 
-   Restart the connman service:
+        @ATMT.receive_condition(ECU_ON)  # type: ignore
+        def on_pkt_on_received(self, pkt: Packet) -> None:
+            if response := self.get_default_uds_response(pkt):
+                self.my_send(response)
 
-   ::
-
-       systemctl restart connman.service
-
-
-Dual-CAN Setup
-^^^^^^^^^^^^^^
-
-#. | **Device tree setup**
-   | You'll need to follow this section only if you want to use two CAN
-    interfaces (DCAN0 and DCAN1). This will disable I2C2 from using pins
-    P9.19 and P9.20, which are needed by DCAN0. You only need to perform the
-    steps in this section once.
-
-   | Warning: The configuration in this section will disable BBB capes from
-    working. Each cape has a small I2C EEPROM that stores info that the BBB
-    needs to know in order to communicate with the cape. Disable I2C2, and
-    the BBB has no way to talk to cape EEPROMs. Of course, if you don't use
-    capes then this is not a problem.
-
-   | Acquire DTS sources that matches your kernel version. Go
-    `here <https://github.com/beagleboard/linux/>`__ and switch over to the
-    branch that represents your kernel version. Download the entire branch
-    as a ZIP file. Extract it and do the following (version 4.1 shown as an
-    example):
-
-    ::
-
-        # cd ~/src/linux-4.1/arch/arm/boot/dts/include/
-        # rm dt-bindings
-        # ln -s ../../../../../include/dt-bindings
-        # cd ..
-        Edit am335x-bone-common.dtsi and ensure the line with "//pinctrl-0 = <&i2c2_pins>;" is commented out.
-        Remove the complete &ocp section at the end of this file
-        # mv am335x-boneblack.dts am335x-boneblack.raw.dts
-        # cpp -nostdinc -I include -undef -x assembler-with-cpp am335x-boneblack.raw.dts > am335x-boneblack.dts
-        # dtc -W no-unit_address_vs_reg -O dtb -o am335x-boneblack.dtb -b 0 -@ am335x-boneblack.dts
-        # cp /boot/dtbs/am335x-boneblack.dtb /boot/dtbs/am335x-boneblack.orig.dtb
-        # cp am335x-boneblack.dtb /boot/dtbs/
-        Reboot
-
-#. **Overlay setup**
-    | This section describes how to build the device overlays for the two CAN devices (DCAN0 and DCAN1). You only need to perform the steps in this section once.
-    | Acquire BBB cape overlays, in one of two ways…
-
-    ::
-
-        # apt-get install bb-cape-overlays
-        https://github.com/beagleboard/bb.org-overlays/
-
-    | Then do the following:
-
-
-    ::
-
-        # cd ~/src/bb.org-overlays-master/src/arm
-        # ln -s ../../include
-        # mv BB-CAN1-00A0.dts BB-CAN1-00A0.raw.dts
-        # cp BB-CAN1-00A0.raw.dts BB-CAN0-00A0.raw.dts
-        Edit BB-CAN0-00A0.raw.dts and make relevant to CAN0. Example is shown below.
-        # cpp -nostdinc -I include -undef -x assembler-with-cpp BB-CAN0-00A0.raw.dts > BB-CAN0-00A0.dts
-        # cpp -nostdinc -I include -undef -x assembler-with-cpp BB-CAN1-00A0.raw.dts > BB-CAN1-00A0.dts
-        # dtc -W no-unit_address_vs_reg -O dtb -o BB-CAN0-00A0.dtbo -b 0 -@ BB-CAN0-00A0.dts
-        # dtc -W no-unit_address_vs_reg -O dtb -o BB-CAN1-00A0.dtbo -b 0 -@ BB-CAN1-00A0.dts
-        # cp *.dtbo /lib/firmware
+        def get_default_uds_response(self, pkt: Packet) -> Optional[Packet]:
+            service = bytes(pkt)[0]
+            length = len(pkt)
+            sub_function = bytes(pkt)[1] if length else None
+            match service, length, sub_function:
+                case 0x10, 2, 1:
+                    return UDS()/UDS_DSCPR(b"\x01")
+                case 0x3E, 2, 0:
+                    return UDS() / UDS_TPPR()
+                case 0x3E, 2, 0x80:
+                    return None
+                case 0x3E, 2, _:
+                    return UDS() / UDS_NR(requestServiceId=service,
 
 
-#. | **CAN0 Example Overlay**
-   | Inside the DTS folder, create a file with the content of the
-     following listing.
 
-   ::
-
-        cd ~/bb.org-overlays/src/arm
-        cat <<EOF > BB-CAN0-00A0.raw.dts
-
-        /*
-         * Copyright (C) 2015 Robert Nelson <robertcnelson@gmail.com>
-         *
-         * Virtual cape for CAN0 on connector pins P9.19 P9.20
-         *
-         * This program is free software; you can redistribute it and/or modify
-         * it under the terms of the GNU General Public License version 2 as
-         * published by the Free Software Foundation.
-         */
-        /dts-v1/;
-        /plugin/;
-
-        #include <dt-bindings/board/am335x-bbw-bbb-base.h>
-        #include <dt-bindings/pinctrl/am33xx.h>
-
-        / {
-            compatible = "ti,beaglebone", "ti,beaglebone-black", "ti,beaglebone-green";
-
-            /* identification */
-            part-number = "BB-CAN0";
-            version = "00A0";
-
-            /* state the resources this cape uses */
-            exclusive-use =
-                /* the pin header uses */
-                "P9.19",	/* can0_rx */
-                "P9.20",	/* can0_tx */
-                /* the hardware ip uses */
-                "dcan0";
-
-            fragment@0 {
-                target = <&am33xx_pinmux>;
-                __overlay__ {
-                    bb_dcan0_pins: pinmux_dcan0_pins {
-                        pinctrl-single,pins = <
-                            BONE_P9_19 (PIN_INPUT_PULLUP | MUX_MODE2) /* uart1_txd.d_can0_rx */
-                            BONE_P9_20 (PIN_OUTPUT_PULLUP | MUX_MODE2) /* uart1_rxd.d_can0_tx */
-                        >;
-                    };
-                };
-            };
-
-            fragment@1 {
-                target = <&dcan0>;
-                __overlay__ {
-                    status = "okay";
-                    pinctrl-names = "default";
-                    pinctrl-0 = <&bb_dcan0_pins>;
-                };
-            };
-        };
-        EOF
-
-
-#. | **Test the Dual-CAN Setup**
-   | Do the following each time you need CAN, or automate these steps if you like.
-
-   ::
-
-        # echo BB-CAN0 > /sys/devices/platform/bone_capemgr/slots
-        # echo BB-CAN1 > /sys/devices/platform/bone_capemgr/slots
-        # modprobe can
-        # modprobe can-dev
-        # modprobe can-raw
-        # ip link set can0 up type can bitrate 50000
-        # ip link set can1 up type can bitrate 50000
-
-   Check the output of the Capemanager if both CAN interfaces have been
-   loaded.
-
-   ::
-
-       cat /sys/devices/platform/bone_capemgr/slots
-
-       0: PF----  -1
-       1: PF----  -1
-       2: PF----  -1
-       3: PF----  -1
-       4: P-O-L-   0 Override Board Name,00A0,Override Manuf, BB-CAN0
-       5: P-O-L-   1 Override Board Name,00A0,Override Manuf, BB-CAN1
-
-
-   If something went wrong, ``dmesg`` provides kernel messages to analyse the root of failure.
-
-#. | **References**
-
-    -  `embedded-things.com: Enable CANbus on the Beaglebone
-       Black <http://www.embedded-things.com/bbb/enable-canbus-on-the-beaglebone-black/>`__
-    -  `electronics.stackexchange.com: Beaglebone Black CAN bus
-       Setup <https://electronics.stackexchange.com/questions/195416/beaglebone-black-can-bus-setup>`__
-
-#. | **Acknowledgment**
-   | Thanks to Tom Haramori. Parts of this section are copied from his guide: https://github.com/haramori/rhme3/blob/master/Preparation/BBB_CAN_setup.md
-
-
+Test-Setup Tutorials
+====================
 
 ISO-TP Kernel Module Installation
 ---------------------------------
@@ -1301,16 +1943,16 @@ A Linux ISO-TP kernel module can be downloaded from this website:
 ``README.isotp`` in this repository provides all information and
 necessary steps for downloading and building this kernel module. The
 ISO-TP kernel module should also be added to the ``/etc/modules`` file,
-to load this module automatically at system boot of the BBB.
+to load this module automatically at system boot.
 
 CAN-Interface Setup
 -------------------
 
-As the final step to prepare the BBB's CAN interfaces for usage, these
+As the final step to prepare CAN interfaces for usage, these
 interfaces have to be set up through some terminal commands. The bitrate
 can be chosen to fit the bitrate of a CAN bus under test.
 
-::
+How-To::
 
     ip link set can0 up type can bitrate 500000
     ip link set can1 up type can bitrate 500000
@@ -1326,7 +1968,7 @@ To build a small test environment in which you can send SOME/IP messages to and 
 
 #. | **Vsomeip setup**
 
-   Download the vsomeip library on the Rapsberry, apply the git patch so it can work with the newer boost libraries and then install it.
+   Download the vsomeip library on the Raspberry, apply the git patch so it can work with the newer boost libraries and then install it.
 
    ::
 
@@ -1348,11 +1990,8 @@ To build a small test environment in which you can send SOME/IP messages to and 
 
 
 
-Software Setup
---------------
-
-Cannelloni Framework Installation
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Cannelloni Framework
+--------------------
 
 The Cannelloni framework is a small application written in C++ to
 transfer CAN data over UDP. In this way, a researcher can map the CAN
@@ -1364,7 +2003,7 @@ explains the installation and usage in detail. Cannelloni needs virtual
 CAN interfaces on the operator's machine. The next listing shows the
 setup of virtual CAN interfaces.
 
-::
+How-To::
 
     modprobe vcan
 

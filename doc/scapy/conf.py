@@ -37,7 +37,7 @@ extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.napoleon',
     'sphinx.ext.todo',
-    'sphinx.ext.viewcode',
+    'sphinx.ext.linkcode',
     'scapy_doc'
 ]
 
@@ -49,6 +49,9 @@ autodoc_default_options = {
 
 # Enable the todo module
 todo_include_todos = True
+
+# Linkcode resolver
+from linkcode_res import linkcode_resolve
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -65,7 +68,7 @@ master_doc = 'index'
 # General information about the project.
 project = 'Scapy'
 year = datetime.datetime.now().year
-copyright = '2008-%s Philippe Biondi and the Scapy community' % year
+copyright = '2008-%s The Scapy community' % year
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -81,7 +84,7 @@ version = VERSION
 #
 # This is also used if you do content translation via gettext catalogs.
 # Usually you set "language" from the command line for these cases.
-language = None
+language = 'en'
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -93,6 +96,12 @@ pygments_style = 'sphinx'
 
 # If true, `todo` and `todoList` produce output, else they produce nothing.
 todo_include_todos = False
+
+# Enable codeauthor and sectionauthor directives
+show_authors = True
+
+# Mock python-can
+autodoc_mock_imports = ["can"]
 
 
 # -- Options for HTML output ----------------------------------------------
@@ -159,7 +168,7 @@ latex_elements = {
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
   ('index', 'Scapy.tex', 'Scapy Documentation',
-   'Philippe Biondi and the Scapy community', 'manual'),
+   'The Scapy community', 'manual'),
 ]
 
 
@@ -169,7 +178,7 @@ latex_documents = [
 # (source start file, name, description, authors, manual section).
 man_pages = [
     (master_doc, 'scapy', 'Scapy Documentation',
-     ['Philippe Biondi and the Scapy community'], 1)
+     ['The Scapy community'], 1)
 ]
 
 
@@ -180,7 +189,9 @@ man_pages = [
 #  dir menu entry, description, category)
 texinfo_documents = [
     (master_doc, 'Scapy', 'Scapy Documentation',
-     'Philippe Biondi and the Scapy community', 'Scapy',
+     'The Scapy community', 'Scapy',
      '',
      'Miscellaneous'),
 ]
+
+suppress_warnings = ["app.add_directive", "ref.python"]

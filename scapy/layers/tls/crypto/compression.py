@@ -1,18 +1,19 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # This file is part of Scapy
+# See https://scapy.net/ for more information
 # Copyright (C) 2007, 2008, 2009 Arnaud Ebalard
 #               2015, 2016 Maxence Tury
-# This program is published under a GPLv2 license
 
 """
 TLS compression.
 """
 
-from __future__ import absolute_import
 import zlib
 
 from scapy.error import warning
-import scapy.modules.six as six
 
+
+TLS_MAX_DECOMPRESSION = 1024 * 1024
 
 _tls_compression_algs = {}
 _tls_compression_algs_cls = {}
@@ -33,7 +34,7 @@ class _GenericCompMetaclass(type):
         return the_class
 
 
-class _GenericComp(six.with_metaclass(_GenericCompMetaclass, object)):
+class _GenericComp(metaclass=_GenericCompMetaclass):
     pass
 
 
@@ -64,7 +65,7 @@ class Comp_Deflate(_GenericComp):
         return tmp
 
     def decompress(self, s):
-        return self.decompress_state.decompress(s)
+        return self.decompress_state.decompress(s, TLS_MAX_DECOMPRESSION)
 
     def __init__(self):
         self.compress_state = zlib.compressobj()

@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# This file is part of Scapy
+# See https://scapy.net/ for more information
+
 # scapy.contrib.description = MACControl
 # scapy.contrib.status = loads
 
@@ -6,17 +10,6 @@
     ~~~~~~~~~~
 
     :author:    Thomas Tannhaeuser, hecke@naberius.de
-    :license:   GPLv2
-
-        This module is free software; you can redistribute it and/or
-        modify it under the terms of the GNU General Public License
-        as published by the Free Software Foundation; either version 2
-        of the License, or (at your option) any later version.
-
-        This module is distributed in the hope that it will be useful,
-        but WITHOUT ANY WARRANTY; without even the implied warranty of
-        MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-        GNU General Public License for more details.
 
     :description:
 
@@ -37,7 +30,6 @@
 
 """
 
-from scapy.compat import orb
 from scapy.data import ETHER_TYPES
 from scapy.error import Scapy_Exception
 from scapy.fields import IntField, ByteField, ByteEnumField, ShortField, BitField  # noqa: E501
@@ -91,7 +83,7 @@ class MACControl(Packet):
     def guess_payload_class(self, payload):
 
         try:
-            op_code = (orb(payload[0]) << 8) + orb(payload[1])
+            op_code = (payload[0] << 8) + payload[1]
             return MAC_CTRL_CLASSES[op_code]
         except KeyError:
             pass

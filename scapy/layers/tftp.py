@@ -1,25 +1,35 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # This file is part of Scapy
-# See http://www.secdev.org/projects/scapy for more information
+# See https://scapy.net/ for more information
 # Copyright (C) Philippe Biondi <phil@secdev.org>
-# This program is published under a GPLv2 license
 
 """
 TFTP (Trivial File Transfer Protocol).
+
+This provides TFTP implementation and 4 small automata:
+    - TFTP_read: read a remote file
+    - TFTP_RRQ_server: server that answers to read requests
+    - TFTP_write: write a remote file
+    - TFTP_WRQ_server: server than accepts write requests
 """
 
-from __future__ import absolute_import
 import os
 import random
 
 from scapy.packet import Packet, bind_layers, split_bottom_up, bind_bottom_up
-from scapy.fields import PacketListField, ShortEnumField, ShortField, \
-    StrNullField
+from scapy.fields import (
+    PacketListField,
+    ShortEnumField,
+    ShortField,
+    StrNullField,
+)
 from scapy.automaton import ATMT, Automaton
-from scapy.layers.inet import UDP, IP
-from scapy.modules.six.moves import range
+from scapy.base_classes import Net
 from scapy.config import conf
+from scapy.sessions import IPSession
 from scapy.volatile import RandShort
 
+from scapy.layers.inet import UDP, IP
 
 TFTP_operations = {1: "RRQ", 2: "WRQ", 3: "DATA", 4: "ACK", 5: "ERROR", 6: "OACK"}  # noqa: E501
 
@@ -83,7 +93,7 @@ class TFTP_ACK(Packet):
     def answers(self, other):
         if isinstance(other, TFTP_DATA):
             return self.block == other.block
-        elif isinstance(other, TFTP_RRQ) or isinstance(other, TFTP_WRQ) or isinstance(other, TFTP_OACK):  # noqa: E501
+        elif isinstance(other, (TFTP_RRQ, TFTP_WRQ, TFTP_OACK)):  # noqa: E501
             return self.block == 0
         return 0
 
@@ -109,10 +119,7 @@ class TFTP_ERROR(Packet):
                    StrNullField("errormsg", "")]
 
     def answers(self, other):
-        return (isinstance(other, TFTP_DATA) or
-                isinstance(other, TFTP_RRQ) or
-                isinstance(other, TFTP_WRQ) or
-                isinstance(other, TFTP_ACK))
+        return isinstance(other, (TFTP_DATA, TFTP_RRQ, TFTP_WRQ, TFTP_ACK))
 
     def mysummary(self):
         return self.sprintf("ERROR %errorcode%: %errormsg%"), [UDP]
@@ -123,7 +130,7 @@ class TFTP_OACK(Packet):
     fields_desc = []
 
     def answers(self, other):
-        return isinstance(other, TFTP_WRQ) or isinstance(other, TFTP_RRQ)
+        return isinstance(other, (TFTP_WRQ, TFTP_RRQ))
 
 
 bind_layers(UDP, TFTP, dport=69)
@@ -138,8 +145,22 @@ bind_layers(TFTP_WRQ, TFTP_Options)
 bind_layers(TFTP_OACK, TFTP_Options)
 
 
+# Automatons
+
 class TFTP_read(Automaton):
+    """
+    TFTP automaton to read a remote file on a TFTP server.
+
+    :param filename: the name of the remote file to read.
+    :param server: the host on which to read (IP or name).
+    :param sport: (optional) the source port to use. (default: random)
+    :param port: (optional) the TFTP port (default: 69)
+    """
+
     def parse_args(self, filename, server, sport=None, port=69, **kargs):
+        if "iface" not in kargs:
+            server = str(Net(server))
+            kargs["iface"] = conf.route.route(server)[0]
         Automaton.parse_args(self, **kargs)
         self.filename = filename
         self.server = server
@@ -158,7 +179,7 @@ class TFTP_read(Automaton):
         self.my_tid = self.sport or RandShort()._fix()
         bind_bottom_up(UDP, TFTP, dport=self.my_tid)
         self.server_tid = None
-        self.res = b""
+        self.res = bytearray()
 
         self.l3 = IP(dst=self.server) / UDP(sport=self.my_tid, dport=self.port) / TFTP()  # noqa: E501
         self.last_packet = self.l3 / TFTP_RRQ(filename=self.filename, mode="octet")  # noqa: E501
@@ -222,11 +243,24 @@ class TFTP_read(Automaton):
     @ATMT.state(final=1)
     def END(self):
         split_bottom_up(UDP, TFTP, dport=self.my_tid)
-        return self.res
+        return bytes(self.res)
 
 
 class TFTP_write(Automaton):
+    """
+    TFTP automaton to write a local file onto a TFTP server.
+
+    :param filename: the name of the remote file to write.
+    :param data: the bytes data to write.
+    :param server: the host on which to read (IP or name).
+    :param sport: (optional) the source port to use. (default: random)
+    :param port: (optional) the TFTP port (default: 69)
+    """
+
     def parse_args(self, filename, data, server, sport=None, port=69, **kargs):
+        if "iface" not in kargs:
+            server = str(Net(server))
+            kargs["iface"] = conf.route.route(server)[0]
         Automaton.parse_args(self, **kargs)
         self.filename = filename
         self.server = server
@@ -306,20 +340,36 @@ class TFTP_write(Automaton):
 
 
 class TFTP_WRQ_server(Automaton):
+    """
+    TFTP automaton to wait for incoming files
+
+    :param ip: (optional) the local IP to listen on.
+    :param sport: (optional) the local port (by default: random)
+    """
 
     def parse_args(self, ip=None, sport=None, *args, **kargs):
+        if "iface" not in kargs and ip:
+            ip = str(Net(ip))
+            kargs["iface"] = conf.route.route(ip)[0]
+        kargs.setdefault("session", IPSession())
         Automaton.parse_args(self, *args, **kargs)
         self.ip = ip
         self.sport = sport
 
     def master_filter(self, pkt):
-        return TFTP in pkt and (not self.ip or pkt[IP].dst == self.ip)
+        return (
+            TFTP in pkt and
+            (not self.ip or pkt[IP].dst == self.ip) and
+            (self.client is None or
+             self.client == (pkt[IP].src, pkt[UDP].sport))
+        )
 
     @ATMT.state(initial=1)
     def BEGIN(self):
         self.blksize = 512
         self.blk = 1
         self.filedata = b""
+        self.client = None
         self.my_tid = self.sport or random.randint(10000, 65500)
         bind_bottom_up(UDP, TFTP, dport=self.my_tid)
 
@@ -333,6 +383,7 @@ class TFTP_WRQ_server(Automaton):
         ip = pkt[IP]
         self.ip = ip.dst
         self.dst = ip.src
+        self.client = (ip.src, pkt[UDP].sport)
         self.filename = pkt[TFTP_WRQ].filename
         options = pkt.getlayer(TFTP_Options)
         self.l3 = IP(src=ip.dst, dst=ip.src) / UDP(sport=self.my_tid, dport=pkt.sport) / TFTP()  # noqa: E501
@@ -342,8 +393,14 @@ class TFTP_WRQ_server(Automaton):
         else:
             opt = [x for x in options.options if x.oname.upper() == b"BLKSIZE"]
             if opt:
-                self.blksize = int(opt[0].value)
-                self.debug(2, "Negotiated new blksize at %i" % self.blksize)
+                try:
+                    blksize = int(opt[0].value)
+                    if blksize < 8 or blksize > 65464:
+                        raise ValueError
+                    self.blksize = blksize
+                    self.debug(2, "Negotiated new blksize at %i" % self.blksize)
+                except ValueError:
+                    opt = []
             self.last_packet = self.l3 / TFTP_OACK() / TFTP_Options(options=opt)  # noqa: E501
             self.send(self.last_packet)
 
@@ -365,7 +422,7 @@ class TFTP_WRQ_server(Automaton):
 
     @ATMT.action(receive_data)
     def ack_data(self):
-        self.last_packet = self.l3 / TFTP_ACK(block=self.blk)
+        self.last_packet = self.l3 / TFTP_ACK(block=self.blk % 65536)
         self.send(self.last_packet)
 
     @ATMT.state()
@@ -383,7 +440,27 @@ class TFTP_WRQ_server(Automaton):
 
 
 class TFTP_RRQ_server(Automaton):
+    """
+    TFTP automaton to serve local files
+
+    You can't use 'store' and 'dir' at the same time.
+
+    :param store: (optional) a dictionary that contains the file data, like
+                  {"thefile": b"data"}.
+    :param dir: (optional) a folder that contains the data file data.
+    :param joker: (optional) data to return when no file/data is found.
+    :param ip: (optional) the local IP to listen on.
+    :param sport: (optional) the local port (by default: random)
+    :param serve_one: (optional) close after serving one client (default: False)
+    """
+
+    MAX_RETRIES = 3
+
     def parse_args(self, store=None, joker=None, dir=None, ip=None, sport=None, serve_one=False, **kargs):  # noqa: E501
+        if "iface" not in kargs and ip:
+            ip = str(Net(ip))
+            kargs["iface"] = conf.route.route(ip)[0]
+        kargs.setdefault("session", IPSession())
         Automaton.parse_args(self, **kargs)
         if store is None:
             store = {}
@@ -415,10 +492,12 @@ class TFTP_RRQ_server(Automaton):
     @ATMT.state()
     def RECEIVED_RRQ(self, pkt):
         ip = pkt[IP]
-        options = pkt[TFTP_Options]
+        options = pkt.getlayer(TFTP_Options)
         self.l3 = IP(src=ip.dst, dst=ip.src) / UDP(sport=self.my_tid, dport=ip.sport) / TFTP()  # noqa: E501
         self.filename = pkt[TFTP_RRQ].filename.decode("utf-8", "ignore")
         self.blk = 1
+        self.retry_block = self.blk
+        self.retries = 0
         self.data = None
         if self.filename in self.store:
             self.data = self.store[self.filename]
@@ -436,8 +515,14 @@ class TFTP_RRQ_server(Automaton):
         if options:
             opt = [x for x in options.options if x.oname.upper() == b"BLKSIZE"]
             if opt:
-                self.blksize = int(opt[0].value)
-                self.debug(2, "Negotiated new blksize at %i" % self.blksize)
+                try:
+                    blksize = int(opt[0].value)
+                    if blksize < 8 or blksize > 65464:
+                        raise ValueError
+                    self.blksize = blksize
+                    self.debug(2, "Negotiated new blksize at %i" % self.blksize)
+                except ValueError:
+                    opt = []
             self.last_packet = self.l3 / TFTP_OACK() / TFTP_Options(options=opt)  # noqa: E501
             self.send(self.last_packet)
 
@@ -454,14 +539,28 @@ class TFTP_RRQ_server(Automaton):
 
     @ATMT.action(file_not_found)
     def send_error(self):
-        self.send(self.l3 / TFTP_ERROR(errorcode=1, errormsg=TFTP_Error_Codes[1]))  # noqa: E501
+        self.send(self.l3 / TFTP_ERROR(
+            errorcode=1,
+            errormsg=TFTP_Error_Codes[1],
+        ))
 
     @ATMT.state()
     def SEND_FILE(self):
-        self.send(self.l3 / TFTP_DATA(block=self.blk) / self.data[(self.blk - 1) * self.blksize:self.blk * self.blksize])  # noqa: E501
+        self.send(
+            self.l3 / TFTP_DATA(block=self.blk % 65536) /
+            self.data[(self.blk - 1) * self.blksize:self.blk * self.blksize]
+        )
 
     @ATMT.timeout(SEND_FILE, 3)
     def timeout_waiting_ack(self):
+        if self.retry_block != self.blk:
+            self.retry_block = self.blk
+            self.retries = 0
+        if self.retries >= self.MAX_RETRIES:
+            if self.serve_one:
+                raise self.END()
+            raise self.WAIT_RRQ()
+        self.retries += 1
         raise self.SEND_FILE()
 
     @ATMT.receive_condition(SEND_FILE)

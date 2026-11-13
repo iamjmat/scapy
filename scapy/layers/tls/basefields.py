@@ -1,7 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # This file is part of Scapy
+# See https://scapy.net/ for more information
 # Copyright (C) 2007, 2008, 2009 Arnaud Ebalard
 #               2015, 2016, 2017 Maxence Tury
-# This program is published under a GPLv2 license
 
 """
 TLS base fields, used for record parsing/building. As several operations depend
@@ -10,8 +11,6 @@ upon the TLS version or ciphersuite, the packet has to provide a TLS context.
 import struct
 
 from scapy.fields import ByteField, ShortEnumField, ShortField, StrField
-import scapy.modules.six as six
-from scapy.compat import orb
 
 _tls_type = {20: "change_cipher_spec",
              21: "alert",
@@ -167,8 +166,10 @@ class _TLSMACField(StrField):
         return s
 
     def getfield(self, pkt, s):
-        if (pkt.tls_session.rcs.cipher.type != "aead" and
-                False in six.itervalues(pkt.tls_session.rcs.cipher.ready)):
+        if (
+            pkt.tls_session.rcs.cipher.type != "aead" and
+            False in pkt.tls_session.rcs.cipher.ready.values()
+        ):
             # XXX Find a more proper way to handle the still-encrypted case
             return s, b""
         tmp_len = pkt.tls_session.rcs.mac_len
@@ -201,7 +202,7 @@ class _TLSPadField(StrField):
             # because it's possible that the padding is followed by some data
             # from another TLS record (hence the last byte from s would not be
             # the last byte from the current record padding).
-            tmp_len = orb(s[pkt.padlen - 1])
+            tmp_len = s[pkt.padlen - 1]
             return s[tmp_len:], self.m2i(pkt, s[:tmp_len])
         return s, None
 

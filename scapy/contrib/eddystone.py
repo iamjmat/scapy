@@ -1,10 +1,7 @@
-# -*- mode: python3; indent-tabs-mode: nil; tab-width: 4 -*-
-# eddystone.py - protocol handlers for Eddystone beacons
-#
+# SPDX-License-Identifier: GPL-2.0-or-later
 # This file is part of Scapy
-# See http://www.secdev.org/projects/scapy for more information
+# See https://scapy.net/ for more information
 # Copyright (C) Michael Farrell <micolous+git@gmail.com>
-# This program is published under a GPLv2 (or later) license
 #
 # scapy.contrib.description = Eddystone BLE proximity beacon
 # scapy.contrib.status = loads
@@ -22,12 +19,10 @@ These beacons are used as building blocks for other systems:
 
 """
 
-from scapy.compat import orb
 from scapy.fields import IntField, SignedByteField, StrField, BitField, \
     StrFixedLenField, ShortField, FixedPointField, ByteEnumField
 from scapy.layers.bluetooth import EIR_Hdr, EIR_ServiceData16BitUUID, \
     EIR_CompleteList16BitServiceUUIDs, LowEnergyBeaconHelper
-import scapy.modules.six as six
 from scapy.packet import bind_layers, Packet
 
 EDDYSTONE_UUID = 0xfeaa
@@ -66,7 +61,7 @@ class EddystoneURLField(StrField):
         o = bytearray()
         p = 0
         while p < len(x):
-            c = orb(x[p])
+            c = x[p]
             if c == 46:  # "."
                 for k, v in EDDYSTONE_URL_TABLE.items():
                     if x.startswith(v, p):
@@ -88,7 +83,7 @@ class EddystoneURLField(StrField):
 
         o = bytearray()
         for c in x:
-            i = orb(c)
+            i = c
             r = EDDYSTONE_URL_TABLE.get(i)
             if r is None:
                 o.append(i)
@@ -97,7 +92,7 @@ class EddystoneURLField(StrField):
         return bytes(o)
 
     def any2i(self, pkt, x):
-        if isinstance(x, six.text_type):
+        if isinstance(x, str):
             x = x.encode("ascii")
         return x
 

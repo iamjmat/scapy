@@ -1,29 +1,31 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # This file is part of Scapy
-# See http://www.secdev.org/projects/scapy for more information
+# See https://scapy.net/ for more information
 # Copyright (C) Philippe Biondi <phil@secdev.org>
-# This program is published under a GPLv2 license
 
 """
 Direct Access dictionary.
 """
 
-from __future__ import absolute_import
-from __future__ import print_function
-from scapy.error import Scapy_Exception
-import scapy.modules.six as six
+from scapy.error import log_runtime, Scapy_Exception
 from scapy.compat import plain_str
 
-from scapy.compat import (
+# Typing
+from typing import (
     Any,
+    Callable,
     Dict,
     Generic,
     Iterator,
     List,
+    Optional,
+    Tuple,
+    Type,
     TypeVar,
     Union,
-    cast,
-    _Generic_metaclass,
 )
+from scapy.compat import Self
+
 
 ###############################
 #  Direct Access dictionary   #
@@ -55,7 +57,6 @@ _K = TypeVar('_K')  # Key type
 _V = TypeVar('_V')  # Value type
 
 
-@six.add_metaclass(_Generic_metaclass)
 class DADict(Generic[_K, _V]):
     """
     Direct Access Dictionary
@@ -71,12 +72,38 @@ class DADict(Generic[_K, _V]):
     Whereas humans can access::
 
         ETHER_TYPES.IPv4 -> 2048
+
+    :param lazy_load: optional callable returning a DADict or dict, called on
+        first access to the contents. Failed loads are retried on next access.
     """
-    def __init__(self, _name="DADict", **kargs):
-        # type: (str, **Any) -> None
+    __slots__ = ["_name", "_d", "_lazy_load"]
+
+    def __init__(self, _name="DADict", lazy_load=None, **kargs):
+        # type: (str, Optional[Callable[[], Union[DADict[_K, _V], Dict[_K, _V]]]], **Any) -> None  # noqa: E501
         self._name = _name
-        self.d = {}  # type: Dict[_K, _V]
-        self.update(kargs)
+        self._d = {}  # type: Dict[_K, _V]
+        self._lazy_load = lazy_load
+        self.update(kargs)  # type: ignore
+
+    @property
+    def d(self):
+        # type: () -> Dict[_K, _V]
+        if self._lazy_load is not None:
+            log_runtime.debug("Lazy loaded DADict [%s]" % self._name)
+            loaded = self._lazy_load()
+            if isinstance(loaded, DADict):
+                self._d = loaded.d
+                self._name = loaded._name
+            else:
+                self._d = loaded
+            self._lazy_load = None
+        return self._d
+
+    @d.setter
+    def d(self, value):
+        # type: (Dict[_K, _V]) -> None
+        self._d = value
+        self._lazy_load = None
 
     def ident(self, v):
         # type: (_V) -> str
@@ -88,13 +115,13 @@ class DADict(Generic[_K, _V]):
         return "unknown"
 
     def update(self, *args, **kwargs):
-        # type: (*Dict[str, _V], **Dict[str, _V]) -> None
-        for k, v in six.iteritems(dict(*args, **kwargs)):
-            self[k] = v
+        # type: (*Dict[_K, _V], **Dict[_K, _V]) -> None
+        for k, v in dict(*args, **kwargs).items():
+            self[k] = v  # type: ignore
 
     def iterkeys(self):
         # type: () -> Iterator[_K]
-        for x in six.iterkeys(self.d):
+        for x in self.d:
             if not isinstance(x, str) or x[0] != "_":
                 yield x
 
@@ -108,7 +135,7 @@ class DADict(Generic[_K, _V]):
 
     def itervalues(self):
         # type: () -> Iterator[_V]
-        return six.itervalues(self.d)  # type: ignore
+        return self.d.values()  # type: ignore
 
     def values(self):
         # type: () -> List[_V]
@@ -143,14 +170,26 @@ class DADict(Generic[_K, _V]):
 
     def __getattr__(self, attr):
         # type: (str) -> _K
+        if attr in ("d", "_d", "_lazy_load"):
+            raise AttributeError(attr)
         try:
             return object.__getattribute__(self, attr)  # type: ignore
         except AttributeError:
-            for k, v in six.iteritems(self.d):
+            for k, v in self.d.items():
                 if self.ident(v) == attr:
-                    return cast(_K, k)
+                    return k
         raise AttributeError
 
     def __dir__(self):
         # type: () -> List[str]
         return [self.ident(x) for x in self.itervalues()]
+
+    def __reduce__(self):
+        # type: () -> Tuple[Type[Self], Tuple[str], Tuple[Dict[_K, _V]]]
+        data = self.d
+        return (self.__class__, (self._name,), (data,))
+
+    def __setstate__(self, state):
+        # type: (Tuple[Dict[_K, _V]]) -> Self
+        self.d.update(state[0])
+        return self

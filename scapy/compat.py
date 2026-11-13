@@ -1,92 +1,60 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # This file is part of Scapy
-# See http://www.secdev.org/projects/scapy for more information
-# Copyright (C) Gabriel Potter <gabriel@potter.fr>
-# This program is published under a GPLv2 license
+# See https://scapy.net/ for more information
 
 """
-Python 2 and 3 link classes.
+Compatibility module to various older versions of Python
 """
 
-from __future__ import absolute_import
 import base64
 import binascii
-import collections
-import gzip
-import socket
+import enum
+import ntpath
+import pathlib
 import struct
 import sys
 
-import scapy.modules.six as six
+from scapy.consts import WINDOWS
+
+from typing import (
+    Any,
+    AnyStr,
+    Callable,
+    Optional,
+    TypeVar,
+    Union,
+    TYPE_CHECKING,
+)
 
 # Very important: will issue typing errors otherwise
 __all__ = [
     # typing
-    'Any',
-    'AnyStr',
-    'Callable',
-    'DefaultDict',
-    'Dict',
-    'Generic',
-    'Iterator',
-    'IO',
-    'List',
-    'Literal',
-    'NoReturn',
-    'Optional',
-    'Pattern',
-    'Sequence',
-    'Set',
-    'Sequence',
-    'Sized',
-    'Tuple',
-    'Type',
-    'TypeVar',
-    'Union',
-    'cast',
-    'FAKE_TYPING',
-    'TYPE_CHECKING',
+    'DecoratorCallable',
+    'Self',
+    'UserDict',
     # compat
-    'AddressFamily',
     'base64_bytes',
     'bytes_base64',
     'bytes_encode',
     'bytes_hex',
     'chb',
-    'gzip_compress',
-    'gzip_decompress',
     'hex_bytes',
-    'lambda_tuple_converter',
-    'orb',
+    'isreserved',
     'plain_str',
     'raw',
+    'StrEnum',
 ]
 
 # Typing compatibility
 
 # Note:
 # supporting typing on multiple python versions is a nightmare.
-# Since Python 3.7, Generic is a type instead of a metaclass,
-# therefore we can't support both at the same time. Our strategy
-# is to only use the typing module if the Python version is >= 3.7
-# and use totally fake replacements otherwise.
-# HOWEVER, when using the fake ones, to emulate stub Generic
-# fields (e.g. _PacketField[str]) we need to add a fake
-# __getitem__ to Field_metaclass
+# we provide a FakeType class to be able to use types added on
+# later Python versions (since we run mypy on 3.14), on older
+# ones.
 
-try:
-    import typing  # noqa: F401
-    from typing import TYPE_CHECKING
-    if sys.version_info[0:2] <= (3, 6):
-        # Generic is messed up before Python 3.7
-        # https://github.com/python/typing/issues/449
-        raise ImportError
-    FAKE_TYPING = False
-except ImportError:
-    FAKE_TYPING = True
-    TYPE_CHECKING = False
 
 # Import or create fake types
-
 
 def _FakeType(name, cls=object):
     # type: (str, Optional[type]) -> Any
@@ -95,7 +63,7 @@ def _FakeType(name, cls=object):
             # type: (str) -> None
             self.name = name
 
-        # make the objects subscriptable indefinetly
+        # make the objects subscriptable indefinitely
         def __getitem__(self, item):  # type: ignore
             return cls
 
@@ -111,79 +79,27 @@ def _FakeType(name, cls=object):
     return _FT(name)
 
 
-if not FAKE_TYPING:
-    # Only required if using mypy-lang for static typing
-    from typing import (
-        Any,
-        AnyStr,
-        Callable,
-        DefaultDict,
-        Dict,
-        Generic,
-        Iterator,
-        IO,
-        List,
-        NoReturn,
-        Optional,
-        Pattern,
-        Sequence,
-        Set,
-        Sized,
-        Tuple,
-        Type,
-        TypeVar,
-        Union,
-        cast,
-    )
+# Python 3.9 Only
+if sys.version_info >= (3, 9):
+    from collections import UserDict
 else:
-    # Let's be creative and make some fake ones.
-    def cast(_type, obj):  # type: ignore
-        return obj
+    from collections import UserDict as _UserDict
+    UserDict = _FakeType("_UserDict", _UserDict)
 
-    Any = _FakeType("Any")
-    AnyStr = _FakeType("AnyStr")  # type: ignore
-    Callable = _FakeType("Callable")
-    DefaultDict = _FakeType("DefaultDict",  # type: ignore
-                            collections.defaultdict)
-    Dict = _FakeType("Dict", dict)  # type: ignore
-    Generic = _FakeType("Generic")
-    Iterator = _FakeType("Iterator")  # type: ignore
-    IO = _FakeType("IO")  # type: ignore
-    List = _FakeType("List", list)  # type: ignore
-    NoReturn = _FakeType("NoReturn")  # type: ignore
-    Optional = _FakeType("Optional")
-    Pattern = _FakeType("Pattern")  # type: ignore
-    Sequence = _FakeType("Sequence")  # type: ignore
-    Set = _FakeType("Set", set)  # type: ignore
-    Sequence = _FakeType("Sequence", list)  # type: ignore
-    Tuple = _FakeType("Tuple")
-    Type = _FakeType("Type", type)
-    TypeVar = _FakeType("TypeVar")  # type: ignore
-    Union = _FakeType("Union")
 
-    class Sized(object):  # type: ignore
+# Python 3.11 Only
+if sys.version_info >= (3, 11):
+    from typing import Self
+else:
+    Self = _FakeType("Self")
+
+
+# Python 3.11 Only
+if sys.version_info >= (3, 11):
+    from enum import StrEnum
+else:
+    class StrEnum(str, enum.Enum):
         pass
-
-# Python 3.8 Only
-if sys.version_info >= (3, 8):
-    from typing import Literal
-else:
-    Literal = _FakeType("Literal")
-
-# Python 3.4
-if sys.version_info >= (3, 4):
-    from socket import AddressFamily
-else:
-    class AddressFamily:
-        AF_INET = socket.AF_INET
-        AF_INET6 = socket.AF_INET6
-
-
-class _Generic_metaclass(type):
-    if FAKE_TYPING:
-        def __getitem__(self, typ):
-            # type: (Any) -> Any
-            return self
 
 
 ###########
@@ -194,92 +110,44 @@ class _Generic_metaclass(type):
 DecoratorCallable = TypeVar("DecoratorCallable", bound=Callable[..., Any])
 
 
-def lambda_tuple_converter(func):
-    # type: (DecoratorCallable) -> DecoratorCallable
-    """
-    Converts a Python 2 function as
-      lambda (x,y): x + y
-    In the Python 3 format:
-      lambda x,y : x + y
-    """
-    if func is not None and func.__code__.co_argcount == 1:
-        return lambda *args: func(  # type: ignore
-            args[0] if len(args) == 1 else args
-        )
-    else:
-        return func
-
-
 # This is ugly, but we don't want to move raw() out of compat.py
 # and it makes it much clearer
 if TYPE_CHECKING:
     from scapy.packet import Packet
 
 
-if six.PY2:
-    bytes_encode = plain_str = str  # type: Callable[[Any], bytes]
-    orb = ord  # type: Callable[[bytes], int]
+def raw(x):
+    # type: (Packet) -> bytes
+    """
+    Builds a packet and returns its bytes representation.
+    This function is and will always be cross-version compatible
+    """
+    return bytes(x)
 
-    def chb(x):
-        # type: (int) -> bytes
-        if isinstance(x, str):
-            return x
-        return chr(x)
 
-    def raw(x):
-        # type: (Union[Packet]) -> bytes
-        """
-        Builds a packet and returns its bytes representation.
-        This function is and will always be cross-version compatible
-        """
-        if hasattr(x, "__bytes__"):
-            return x.__bytes__()
-        return bytes(x)
-else:
-    def raw(x):
-        # type: (Union[Packet]) -> bytes
-        """
-        Builds a packet and returns its bytes representation.
-        This function is and will always be cross-version compatible
-        """
-        return bytes(x)
+def bytes_encode(x):
+    # type: (Any) -> bytes
+    """Ensure that the given object is bytes. If the parameter is a
+        packet, raw() should be preferred.
 
-    def bytes_encode(x):
-        # type: (Any) -> bytes
-        """Ensure that the given object is bytes.
-        If the parameter is a packet, raw() should be preferred.
-        """
-        if isinstance(x, str):
-            return x.encode()
-        return bytes(x)
+    """
+    if isinstance(x, str):
+        return x.encode()
+    return bytes(x)
 
-    if sys.version_info[0:2] <= (3, 4):
-        def plain_str(x):
-            # type: (AnyStr) -> str
-            """Convert basic byte objects to str"""
-            if isinstance(x, bytes):
-                return x.decode(errors="ignore")
-            return str(x)
-    else:
-        # Python 3.5+
-        def plain_str(x):
-            # type: (Any) -> str
-            """Convert basic byte objects to str"""
-            if isinstance(x, bytes):
-                return x.decode(errors="backslashreplace")
-            return str(x)
 
-    def chb(x):
-        # type: (int) -> bytes
-        """Same than chr() but encode as bytes."""
-        return struct.pack("!B", x)
+def plain_str(x):
+    # type: (Any) -> str
+    """Convert basic byte objects to str"""
+    if isinstance(x, bytes):
+        return x.decode(errors="backslashreplace")
+    return str(x)
 
-    def orb(x):
-        # type: (Union[int, str, bytes]) -> int
-        """Return ord(x) when not already an int."""
-        if isinstance(x, int):
-            return x
-        return ord(x)
+
+def chb(x):
+    # type: (int) -> bytes
+    """Same than chr() but encode as bytes."""
+    return struct.pack("!B", x)
 
 
 def bytes_hex(x):
@@ -294,46 +162,41 @@ def hex_bytes(x):
     return binascii.a2b_hex(bytes_encode(x))
 
 
+def int_bytes(x, size):
+    # type: (int, int) -> bytes
+    """Convert an int to an arbitrary sized bytes string"""
+    return x.to_bytes(size, byteorder='big')
+
+
+def bytes_int(x):
+    # type: (bytes) -> int
+    """Convert an arbitrary sized bytes string to an int"""
+    return int.from_bytes(x, "big")
+
+
 def base64_bytes(x):
     # type: (AnyStr) -> bytes
     """Turn base64 into bytes"""
-    if six.PY2:
-        return base64.decodestring(x)  # type: ignore
     return base64.decodebytes(bytes_encode(x))
 
 
 def bytes_base64(x):
     # type: (AnyStr) -> bytes
     """Turn bytes into base64"""
-    if six.PY2:
-        return base64.encodestring(x).replace('\n', '')  # type: ignore
     return base64.encodebytes(bytes_encode(x)).replace(b'\n', b'')
 
 
-if six.PY2:
-    import cgi
-    html_escape = cgi.escape
+if not WINDOWS:
+    def isreserved(path: Union[str, pathlib.PurePath]) -> bool:
+        """Reserved names (e.g. NUL) only exist on Windows"""
+        return False
+elif sys.version_info >= (3, 13):
+    def isreserved(path: Union[str, pathlib.PurePath]) -> bool:
+        """Return True if path is a reserved name on Windows (e.g. NUL)"""
+        return ntpath.isreserved(path)
 else:
-    import html
-    html_escape = html.escape
-
-
-if six.PY2:
-    from StringIO import StringIO
-
-    def gzip_decompress(x):
-        # type: (AnyStr) -> bytes
-        """Decompress using gzip"""
-        with gzip.GzipFile(fileobj=StringIO(x), mode='rb') as fdesc:
-            return fdesc.read()
-
-    def gzip_compress(x):
-        # type: (AnyStr) -> bytes
-        """Compress using gzip"""
-        buf = StringIO()
-        with gzip.GzipFile(fileobj=buf, mode='wb') as fdesc:
-            fdesc.write(x)
-        return buf.getvalue()
-else:
-    gzip_decompress = gzip.decompress
-    gzip_compress = gzip.compress
+    # PurePath.is_reserved() is deprecated since Python 3.13 and was removed
+    # in 3.15
+    def isreserved(path: Union[str, pathlib.PurePath]) -> bool:
+        """Return True if path is a reserved name on Windows (e.g. NUL)"""
+        return pathlib.PureWindowsPath(path).is_reserved()

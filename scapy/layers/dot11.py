@@ -1,18 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # This file is part of Scapy
-# See http://www.secdev.org/projects/scapy for more information
-# Scapy is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 2 of the License, or
-# any later version.
-#
-# Scapy is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Scapy. If not, see <http://www.gnu.org/licenses/>.
-
+# See https://scapy.net/ for more information
 # Copyright (C) Philippe Biondi <phil@secdev.org>
 
 """
@@ -23,7 +11,6 @@ This file contains bindings for 802.11 layers and some usual linklayers:
   - RadioTap
 """
 
-from __future__ import print_function
 import re
 import struct
 from zlib import crc32
@@ -31,7 +18,7 @@ from zlib import crc32
 from scapy.config import conf, crypto_validator
 from scapy.data import ETHER_ANY, DLT_IEEE802_11, DLT_PRISM_HEADER, \
     DLT_IEEE802_11_RADIO
-from scapy.compat import raw, plain_str, orb, chb
+from scapy.compat import raw, plain_str, chb
 from scapy.packet import Packet, bind_layers, bind_top_down, NoPayload
 from scapy.fields import (
     BitEnumField,
@@ -51,6 +38,7 @@ from scapy.fields import (
     LEShortEnumField,
     LEShortField,
     LESignedIntField,
+    MayEnd,
     MultipleTypeField,
     OUIField,
     PacketField,
@@ -75,9 +63,17 @@ from scapy.sendrecv import sniff, sendp
 if conf.crypto_valid:
     from cryptography.hazmat.backends import default_backend
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms
+
+    try:
+        # cryptography > 43.0
+        from cryptography.hazmat.decrepit.ciphers import (
+            algorithms as decrepit_algorithms,
+        )
+    except ImportError:
+        decrepit_algorithms = algorithms
 else:
-    default_backend = Ciphers = algorithms = None
-    log_loading.info("Can't import python-cryptography v1.7+. Disabled WEP decryption/encryption. (Dot11)")  # noqa: E501
+    default_backend = Ciphers = algorithms = decrepit_algorithms = None
+    log_loading.info("Can't import python-cryptography v2.0+. Disabled WEP decryption/encryption. (Dot11)")  # noqa: E501
 
 
 #########
@@ -185,6 +181,9 @@ _rt_channelflags2 = ['res1', 'res2', 'res3', 'res4', 'Turbo', 'CCK',
                      '40MHz_ext_channel_below',
                      'res5', 'res6', 'res7', 'res8', 'res9']
 
+_rt_tsflags = ['32-bit_counter', 'Accuracy', 'res1', 'res2', 'res3',
+               'res4', 'res5', 'res6']
+
 _rt_knownmcs = ['MCS_bandwidth', 'MCS_index', 'guard_interval', 'HT_format',
                 'FEC_type', 'STBC_streams', 'Ness', 'Ness_MSB']
 
@@ -212,7 +211,7 @@ _rt_presentvht = ['STBC', 'TXOP_PS_NOT_ALLOWED', 'GuardInterval',
                   'SGINsysmDis', 'LDPCextraOFDM', 'Beamformed',
                   'res1', 'res2']
 
-_rt_hemuother_per_user_known = {
+_rt_hemuother_per_user_known = [
     'user field position',
     'STA-ID',
     'NSTS',
@@ -221,7 +220,7 @@ _rt_hemuother_per_user_known = {
     'MCS',
     'DCM',
     'Coding',
-}
+]
 
 
 # Radiotap utils
@@ -398,7 +397,7 @@ class RadioTap(Packet):
         ConditionalField(
             ReversePadField(
                 FlagsField("knownMCS", None, -8, _rt_knownmcs),
-                4
+                2
             ),
             lambda pkt: pkt.present and pkt.present.MCS),
         ConditionalField(
@@ -465,32 +464,38 @@ class RadioTap(Packet):
             LEShortField("ts_accuracy", 0),
             lambda pkt: pkt.present and pkt.present.timestamp),
         ConditionalField(
-            ByteField("ts_position", 0),
+            BitEnumField("ts_unit", 0, 4, {
+                0: 'milliseconds',
+                1: 'microseconds',
+                2: 'nanoseconds'}),
             lambda pkt: pkt.present and pkt.present.timestamp),
         ConditionalField(
-            ByteField("ts_flags", 0),
+            BitField("ts_position", 0, 4),
+            lambda pkt: pkt.present and pkt.present.timestamp),
+        ConditionalField(
+            FlagsField("ts_flags", None, 8, _rt_tsflags),
             lambda pkt: pkt.present and pkt.present.timestamp),
         # HE - XXX not complete
         ConditionalField(
             ReversePadField(
-                ShortField("he_data1", 0),
+                LEShortField("he_data1", 0),
                 2
             ),
             lambda pkt: pkt.present and pkt.present.HE),
         ConditionalField(
-            ShortField("he_data2", 0),
+            LEShortField("he_data2", 0),
             lambda pkt: pkt.present and pkt.present.HE),
         ConditionalField(
-            ShortField("he_data3", 0),
+            LEShortField("he_data3", 0),
             lambda pkt: pkt.present and pkt.present.HE),
         ConditionalField(
-            ShortField("he_data4", 0),
+            LEShortField("he_data4", 0),
             lambda pkt: pkt.present and pkt.present.HE),
         ConditionalField(
-            ShortField("he_data5", 0),
+            LEShortField("he_data5", 0),
             lambda pkt: pkt.present and pkt.present.HE),
         ConditionalField(
-            ShortField("he_data6", 0),
+            LEShortField("he_data6", 0),
             lambda pkt: pkt.present and pkt.present.HE),
         # HE_MU
         ConditionalField(
@@ -503,12 +508,12 @@ class RadioTap(Packet):
             LEShortField("hemu_flags2", 0),
             lambda pkt: pkt.present and pkt.present.HE_MU),
         ConditionalField(
-            FieldListField("RU_channel1", [], ByteField,
-                           count_from=lambda x: 4),
+            FieldListField("RU_channel1", [], ByteField('', 0),
+                           length_from=lambda x: 4),
             lambda pkt: pkt.present and pkt.present.HE_MU),
         ConditionalField(
-            FieldListField("RU_channel2", [], ByteField,
-                           count_from=lambda x: 4),
+            FieldListField("RU_channel2", [], ByteField('', 0),
+                           length_from=lambda x: 4),
             lambda pkt: pkt.present and pkt.present.HE_MU),
         # HE_MU_other_user
         ConditionalField(
@@ -535,10 +540,10 @@ class RadioTap(Packet):
             ),
             lambda pkt: pkt.present and pkt.present.L_SIG),
         ConditionalField(
-            BitField("lsig_length", 0, 12),
+            BitField("lsig_length", 0, 12, tot_size=-2),
             lambda pkt: pkt.present and pkt.present.L_SIG),
         ConditionalField(
-            BitField("lsig_rate", 0, 4),
+            BitField("lsig_rate", 0, 4, end_tot_size=-2),
             lambda pkt: pkt.present and pkt.present.L_SIG),
         # TLV fields
         ConditionalField(
@@ -592,13 +597,15 @@ _dot11_subtypes = {
         9: "ATIM",
         10: "Disassociation",
         11: "Authentication",
-        12: "Deauthentification",
+        12: "Deauthentication",
         13: "Action",
         14: "Action No Ack",
     },
     1: {  # Control
+        2: "Trigger",
+        3: "TACK",
         4: "Beamforming Report Poll",
-        5: "VHT NDP Announcement",
+        5: "VHT/HE NDP Announcement",
         6: "Control Frame Extension",
         7: "Control Wrapper",
         8: "Block Ack Request",
@@ -628,7 +635,8 @@ _dot11_subtypes = {
         15: "QoS CF-Ack+CF-Poll (no data)"
     },
     3: {  # Extension
-        0: "DMG Beacon"
+        0: "DMG Beacon",
+        1: "S1G Beacon"
     }
 }
 
@@ -683,7 +691,7 @@ class _Dot11MacField(MACField):
         return s
 
 
-# 802.11-2016 9.2.4.1.1
+# 802.11-2020 9.2.4.1.1
 class Dot11(Packet):
     name = "802.11"
     fields_desc = [
@@ -700,30 +708,45 @@ class Dot11(Packet):
             [
                 (
                     FlagsField("FCfield", 0, 4,
-                               ["pw-mgt", "MD", "protected", "order"]),
+                               ["pw_mgt", "MD", "protected", "order"]),
                     lambda pkt: (pkt.type, pkt.subtype) == (1, 6)
+                ),
+                (
+                    FlagsField("FCfield", 0, 2,
+                               ["security", "AP_PM"]),
+                    lambda pkt: (pkt.type, pkt.subtype) == (3, 1)
                 )
             ],
             FlagsField("FCfield", 0, 8,
-                       ["to-DS", "from-DS", "MF", "retry",
-                        "pw-mgt", "MD", "protected", "order"])
+                       ["to_DS", "from_DS", "MF", "retry",
+                        "pw_mgt", "MD", "protected", "order"])
         ),
-        ShortField("ID", 0),
+        ConditionalField(
+            BitField("FCfield_bw", 0, 3),
+            lambda pkt: (pkt.type, pkt.subtype) == (3, 1)
+        ),
+        ConditionalField(
+            FlagsField("FCfield2", 0, 3,
+                       ["next_tbtt", "comp_ssid", "ano"]),
+            lambda pkt: (pkt.type, pkt.subtype) == (3, 1)
+        ),
+        LEShortField("ID", 0),
         _Dot11MacField("addr1", ETHER_ANY, 1),
         ConditionalField(
             _Dot11MacField("addr2", ETHER_ANY, 2),
-            lambda pkt: (pkt.type != 1 or
-                         pkt.subtype in [0x8, 0x9, 0xa, 0xb, 0xe, 0xf]),
+            lambda pkt: (pkt.type not in [1, 3] or
+                         pkt.subtype in [0x4, 0x5, 0x6, 0x8, 0x9, 0xa, 0xb, 0xe, 0xf]),
         ),
         ConditionalField(
             _Dot11MacField("addr3", ETHER_ANY, 3),
-            lambda pkt: pkt.type in [0, 2],
+            lambda pkt: (pkt.type in [0, 2] or
+                         ((pkt.type, pkt.subtype) == (1, 6) and pkt.cfe == 6)),
         ),
-        ConditionalField(LEShortField("SC", 0), lambda pkt: pkt.type != 1),
+        ConditionalField(LEShortField("SC", 0), lambda pkt: pkt.type not in [1, 3]),
         ConditionalField(
             _Dot11MacField("addr4", ETHER_ANY, 4),
             lambda pkt: (pkt.type == 2 and
-                         pkt.FCfield & 3 == 3),  # from-DS+to-DS
+                         pkt.FCfield & 3 == 3),  # from_DS+to_DS
         )
     ]
 
@@ -735,7 +758,7 @@ class Dot11(Packet):
         if self.type == 0x02 and (
                 0x08 <= self.subtype <= 0xF and self.subtype != 0xD):
             return Dot11QoS
-        elif self.FCfield.protected:
+        elif hasattr(self.FCfield, "protected") and self.FCfield.protected:
             # When a frame is handled by encryption, the Protected Frame bit
             # (previously called WEP bit) is set to 1, and the Frame Body
             # begins with the appropriate cryptographic header.
@@ -770,6 +793,8 @@ class Dot11(Packet):
         if self.type == 0:  # Management
             return _dot11_addr_meaning[0][index]
         elif self.type == 1:  # Control
+            if (self.type, self.subtype) == (1, 6) and self.cfe == 6:
+                return ["RA", "NAV-SA", "NAV-DA"][index]
             return _dot11_addr_meaning[1][index]
         elif self.type == 2:  # Data
             meaning = _dot11_addr_meaning[2][index][
@@ -957,6 +982,9 @@ _dot11_info_elts_ids = {
     32: "Power Constraint",
     33: "Power Capability",
     36: "Supported Channels",
+    37: "Channel Switch Announcement",
+    38: "Measurement Request",
+    39: "Measurement Report",
     42: "ERP",
     45: "HT Capabilities",
     46: "QoS Capability",
@@ -964,10 +992,13 @@ _dot11_info_elts_ids = {
     50: "Extended Supported Rates",
     52: "Neighbor Report",
     61: "HT Operation",
+    74: "Overlapping BSS Scan Parameters",
     107: "Interworking",
-    127: "Extendend Capabilities",
+    127: "Extended Capabilities",
     191: "VHT Capabilities",
-    221: "Vendor Specific"
+    192: "VHT Operation",
+    221: "Vendor Specific",
+    255: "Element ID Extension"
 }
 
 # Backward compatibility
@@ -996,6 +1027,8 @@ _dot11_id_enum = (
 )
 
 
+# 802.11-2020 9.4.2.1
+
 class Dot11Elt(Packet):
     """
     A Generic 802.11 Element
@@ -1019,10 +1052,8 @@ class Dot11Elt(Packet):
 
     def mysummary(self):
         if self.ID == 0:
-            ssid = repr(self.info)
-            if ssid[:2] in ['b"', "b'"]:
-                ssid = ssid[1:]
-            return "SSID=%s" % ssid, [Dot11]
+            ssid = plain_str(self.info)
+            return "SSID='%s'" % ssid, [Dot11]
         else:
             return ""
 
@@ -1050,7 +1081,7 @@ class Dot11Elt(Packet):
         # This allows to introduce new Dot11Elt classes without breaking
         # previous code
         if len(s) >= 3:
-            length = orb(s[1])
+            length = s[1]
             if length > 0 and length <= 255:
                 self.info = s[2:2 + length]
         return s
@@ -1061,6 +1092,8 @@ class Dot11Elt(Packet):
         return p + pay
 
 
+# 802.11-2020 9.4.2.4
+
 class Dot11EltDSSSet(Dot11Elt):
     name = "802.11 DSSS Parameter Set"
     match_subclass = True
@@ -1070,6 +1103,8 @@ class Dot11EltDSSSet(Dot11Elt):
         ByteField("channel", 0),
     ]
 
+
+# 802.11-2020 9.4.2.11
 
 class Dot11EltERP(Dot11Elt):
     name = "802.11 ERP"
@@ -1083,6 +1118,8 @@ class Dot11EltERP(Dot11Elt):
         BitField("res", 0, 5),
     ]
 
+
+# 802.11-2020 9.4.2.24.2
 
 class RSNCipherSuite(Packet):
     name = "Cipher suite"
@@ -1109,6 +1146,8 @@ class RSNCipherSuite(Packet):
     def extract_padding(self, s):
         return "", s
 
+
+# 802.11-2020 9.4.2.24.3
 
 class AKMSuite(Packet):
     name = "AKM suite"
@@ -1141,6 +1180,8 @@ class AKMSuite(Packet):
         return "", s
 
 
+# 802.11-2020 9.4.2.24.5
+
 class PMKIDListPacket(Packet):
     name = "PMKIDs"
     fields_desc = [
@@ -1156,6 +1197,8 @@ class PMKIDListPacket(Packet):
     def extract_padding(self, s):
         return "", s
 
+
+# 802.11-2020 9.4.2.24.1
 
 class Dot11EltRSN(Dot11Elt):
     name = "802.11 RSN information"
@@ -1187,17 +1230,29 @@ class Dot11EltRSN(Dot11Elt):
             AKMSuite,
             count_from=lambda p: p.nb_akm_suites
         ),
-        BitField("mfp_capable", 0, 1),
-        BitField("mfp_required", 0, 1),
+        # RSN Capabilities
+        # 802.11-2020 9.4.2.24.4
+        BitField("mfp_capable", 1, 1),
+        BitField("mfp_required", 1, 1),
         BitField("gtksa_replay_counter", 0, 2),
         BitField("ptksa_replay_counter", 0, 2),
         BitField("no_pairwise", 0, 1),
         BitField("pre_auth", 0, 1),
-        BitField("reserved", 0, 8),
+        BitField("reserved", 0, 1),
+        BitField("ocvc", 0, 1),
+        BitField("extended_key_id", 0, 1),
+        BitField("pbac", 0, 1),
+        BitField("spp_a_msdu_required", 0, 1),
+        BitField("spp_a_msdu_capable", 0, 1),
+        BitField("peer_key_enabled", 0, 1),
+        BitField("joint_multiband_rsna", 0, 1),
+        # Theoretically we could use mfp_capable/mfp_required to know if those
+        # fields are present, but some implementations poorly implement it.
+        # In practice, do as wireshark: guess using offset.
         ConditionalField(
-            PacketField("pmkids", None, PMKIDListPacket),
+            PacketField("pmkids", PMKIDListPacket(), PMKIDListPacket),
             lambda pkt: (
-                0 if pkt.len is None else
+                True if pkt.len is None else
                 pkt.len - (
                     12 +
                     (pkt.nb_pairwise_cipher_suites or 0) * 4 +
@@ -1208,7 +1263,16 @@ class Dot11EltRSN(Dot11Elt):
         ConditionalField(
             PacketField("group_management_cipher_suite",
                         RSNCipherSuite(cipher=0x6), RSNCipherSuite),
-            lambda pkt: pkt.mfp_capable == 1
+            lambda pkt: (
+                True if pkt.len is None else
+                pkt.len - (
+                    12 +
+                    (pkt.nb_pairwise_cipher_suites or 0) * 4 +
+                    (pkt.nb_akm_suites or 0) * 4 +
+                    (2 if pkt.pmkids else 0) +
+                    (pkt.pmkids and pkt.pmkids.nb_pmkids or 0) * 16
+                ) >= 4
+            )
         )
     ]
 
@@ -1232,17 +1296,25 @@ class Dot11EltCountry(Dot11Elt):
         ByteEnumField("ID", 7, _dot11_id_enum),
         ByteField("len", None),
         StrFixedLenField("country_string", b"\0\0\0", length=3),
-        PacketListField(
+        MayEnd(PacketListField(
             "descriptors",
             [],
             Dot11EltCountryConstraintTriplet,
             length_from=lambda pkt: (
                 pkt.len - 3 - (pkt.len % 3)
             )
-        ),
+        )),
+        # When this extension is last, padding appears to be omitted
         ConditionalField(
             ByteField("pad", 0),
-            lambda pkt: (len(pkt.descriptors) + 1) % 2
+            # The length should be 3 bytes per each triplet, and 3 bytes for the
+            # country_string field. The standard dictates that the element length
+            # must be even, so if the result is odd, add a padding byte.
+            # Some transmitters don't comply with the standard, so instead of assuming
+            # the length, we test whether there is a padding byte.
+            # Some edge cases are still not covered, for example, if the tag length
+            # (pkt.len) is an arbitrary number.
+            lambda pkt: ((len(pkt.descriptors) + 1) % 2) if pkt.len is None else (pkt.len % 3)  # noqa: E501
         )
     ]
 
@@ -1370,21 +1442,24 @@ class Dot11EltVendorSpecific(Dot11Elt):
     def dispatch_hook(cls, _pkt=None, *args, **kargs):
         if _pkt:
             oui = struct.unpack("!I", b"\x00" + _pkt[2:5])[0]
-            if oui == 0x0050f2:  # Microsoft
-                type_ = orb(_pkt[5])
-                if type_ == 0x01:
-                    # MS WPA IE
-                    return Dot11EltMicrosoftWPA
-                elif type_ == 0x02:
-                    # MS WME IE TODO
-                    # return Dot11EltMicrosoftWME
-                    pass
-                elif type_ == 0x04:
-                    # MS WPS IE TODO
-                    # return Dot11EltWPS
-                    pass
-                return Dot11EltVendorSpecific
+            ouicls = cls.registered_ouis.get(oui, cls)
+            if ouicls.dispatch_hook != cls.dispatch_hook:
+                # Sub-classes can have their own dispatch_hook
+                return ouicls.dispatch_hook(_pkt=_pkt, *args, **kargs)
+            cls = ouicls
         return cls
+
+    registered_ouis = {}
+
+    @classmethod
+    def register_variant(cls):
+        oui = cls.oui.default
+        if not oui:
+            # This is Dot11EltVendorSpecific, register it in the super-class.
+            super().register_variant()
+        elif oui not in cls.registered_ouis:
+            # Sub-Vendor (e.g. Dot11EltMicrosoftWPA)
+            cls.registered_ouis[oui] = cls
 
 
 class Dot11EltMicrosoftWPA(Dot11EltVendorSpecific):
@@ -1397,6 +1472,317 @@ class Dot11EltMicrosoftWPA(Dot11EltVendorSpecific):
     fields_desc = Dot11EltVendorSpecific.fields_desc[:3] + [
         XByteField("type", 0x01)
     ] + Dot11EltRSN.fields_desc[2:8]
+
+    @classmethod
+    def dispatch_hook(cls, _pkt=None, *args, **kargs):
+        if _pkt:
+            type_ = _pkt[5]
+            if type_ == 0x01:
+                # MS WPA IE
+                return Dot11EltMicrosoftWPA
+            elif type_ == 0x02:
+                # MS WME IE TODO
+                # return Dot11EltMicrosoftWME
+                pass
+            elif type_ == 0x04:
+                # MS WPS IE TODO
+                # return Dot11EltWPS
+                pass
+            return Dot11EltVendorSpecific
+        return cls
+
+
+# 802.11-2016 9.4.2.19
+
+class Dot11EltCSA(Dot11Elt):
+    name = "802.11 CSA Element"
+    match_subclass = True
+    fields_desc = [
+        ByteEnumField("ID", 37, _dot11_id_enum),
+        ByteField("len", 3),
+        ByteField("mode", 0),
+        ByteField("new_channel", 0),
+        ByteField("channel_switch_count", 0)
+    ]
+
+
+# 802.11-2016 9.4.2.59
+
+class Dot11EltOBSS(Dot11Elt):
+    name = "802.11 OBSS Scan Parameters Element"
+    match_subclass = True
+    fields_desc = [
+        ByteEnumField("ID", 74, _dot11_id_enum),
+        ByteField("len", 14),
+        LEShortField("Passive_Dwell", 0),
+        LEShortField("Active_Dwell", 0),
+        LEShortField("Scan_Interval", 0),
+        LEShortField("Passive_Total_Per_Channel", 0),
+        LEShortField("Active_Total_Per_Channel", 0),
+        LEShortField("Delay", 0),
+        LEShortField("Activity_Threshold", 0),
+    ]
+
+
+# 802.11-2016 9.4.2.159
+
+class Dot11VHTOperationInfo(Packet):
+    name = "802.11 VHT Operation Information"
+    fields_desc = [
+        ByteField("channel_width", 0),
+        ByteField("channel_center0", 36),
+        ByteField("channel_center1", 0),
+    ]
+
+    def extract_padding(self, s):
+        return "", s
+
+
+class Dot11EltVHTOperation(Dot11Elt):
+    name = "802.11 VHT Operation Element"
+    match_subclass = True
+    fields_desc = [
+        ByteEnumField("ID", 192, _dot11_id_enum),
+        ByteField("len", 5),
+        PacketField(
+            "VHT_Operation_Info",
+            Dot11VHTOperationInfo(),
+            Dot11VHTOperationInfo
+        ),
+        FieldListField(
+            "mcs_set",
+            [0x00] * 8,
+            BitField('SS', 0x00, size=2),
+            count_from=lambda x: 8
+        )
+    ]
+
+
+# 802.11ax-2021 9.4.2.1, Table 9-92
+
+class Dot11EltExtension(Dot11Elt):
+    # Element ID Extension is a registry for many IEs. Only HE Operation is
+    # specialized here; unknown and unsupported extension IDs stay generic.
+    name = "802.11 Element ID Extension"
+    match_subclass = True
+    ID = 255
+    fields_desc = [
+        ByteEnumField("ID", 255, _dot11_id_enum),
+        ByteField("len", None),
+        ConditionalField(
+            ByteField("ext_ID", 0),
+            lambda pkt: pkt.len is None or pkt.len > 0
+        ),
+    ]
+
+    @classmethod
+    def dispatch_hook(cls, _pkt=None, *args, **kargs):
+        if not _pkt or len(_pkt) < 3:
+            return cls
+
+        if _pkt:
+            ext_id = _pkt[2]
+            idcls = cls.registered_ext_ids.get(ext_id)
+            if idcls is not None:
+                return idcls
+            return Dot11EltExtensionGeneric
+        return cls
+
+    registered_ext_ids = {}
+
+    @classmethod
+    def register_variant(cls, ext_id=None):
+        ext_id = ext_id or cls.ext_ID.default
+        if not ext_id:
+            # This is Dot11EltExtension, register it in the super-class.
+            super().register_variant()
+        elif ext_id not in cls.registered_ext_ids:
+            # Register extension ID to class (e.g. Dot11EltHEOperation)
+            cls.registered_ext_ids[ext_id] = cls
+
+
+# 802.11ax-2021 9.4.2.1, Table 9-92
+
+class Dot11EltExtensionGeneric(Dot11EltExtension):
+    name = "802.11 Element ID Extension"
+    match_subclass = True
+    ID = 255
+    fields_desc = Dot11EltExtension.fields_desc + [
+        StrLenField("info", b"", length_from=lambda pkt: max(pkt.len - 1, 0))]
+
+
+# 802.11ax-2021 9.4.2.249, Figure 9-788k
+
+class Dot11HE6GOperationInfo(Packet):
+    name = "802.11 HE 6 GHz Operation Information"
+    fields_desc = [
+        ByteField("primary_channel", 0),
+        # Control: 1B
+        BitField("reserved", 0, 2, tot_size=-1),
+        BitField("regulatory_info", 0, 3),
+        BitField("duplicate_beacon", 0, 1),
+        BitField("channel_width", 0, 2, end_tot_size=-1),
+
+        ByteField("channel_center0", 0),
+        ByteField("channel_center1", 0),
+        ByteField("minimum_rate", 0),
+    ]
+
+    def extract_padding(self, s):
+        return "", s
+
+
+# 802.11ax-2021 9.4.2.249
+
+class Dot11EltHEOperation(Dot11EltExtension):
+    name = "802.11 HE Operation"
+    match_subclass = True
+    ID = 255
+    ext_ID = 36
+    fields_desc = Dot11EltExtension.fields_desc + [
+        # HE Operation Parameters: 3B
+        BitField("reserved", 0, 6, tot_size=-3),
+        BitField("six_g_op_info_present", 0, 1),
+        BitField("er_su_disable", 0, 1),
+        BitField("co_hosted_bss", 0, 1),
+        BitField("vht_operation_info_present", 0, 1),
+        BitField("txop_duration_rts_threshold", 0, 10),
+        BitField("twt_required", 0, 1),
+        BitField("default_pe_duration", 0, 3, end_tot_size=-3),
+
+        # BSS Color Information: 1B
+        BitField("bss_color_disabled", 0, 1, tot_size=-1),
+        BitField("partial_bss_color", 0, 1),
+        BitField("bss_color", 0, 6, end_tot_size=-1),
+        # Basic HE-MCS and NSS Set: 2B
+        FieldListField(
+            "basic_he_mcs_and_nss_set",
+            [0x00] * 8,
+            BitField('SS', 0x00, size=2),
+            count_from=lambda x: 8
+        ),
+
+        ConditionalField(
+            PacketField(
+                "vht_operation_info",
+                Dot11VHTOperationInfo(),
+                Dot11VHTOperationInfo
+            ),
+            lambda p: p.vht_operation_info_present == 1),
+
+        ConditionalField(
+            ByteField("max_co_hosted_bssid", 0),
+            lambda p: p.co_hosted_bss == 1),
+
+        ConditionalField(
+            PacketField(
+                "he_6g_operation_info",
+                Dot11HE6GOperationInfo(),
+                Dot11HE6GOperationInfo
+            ),
+            lambda p: p.six_g_op_info_present == 1)
+    ]
+
+
+Dot11EltHEOperation.register_variant(36)
+
+
+# 802.11n-2009 7.3.2.57, Figure 7-95o24, Table 7-43p
+
+class Dot11EltHTOperation(Dot11Elt):
+    name = "802.11 HT Operation"
+    match_subclass = True
+    fields_desc = [
+        ByteEnumField("ID", 61, _dot11_id_enum),
+        ByteField("len", 22),
+        ByteField("primary_channel", 0),
+
+        # HT Operation Information: 1B
+        BitField("reserved_1", 0, 4, tot_size=-1),
+        BitField("rifs_mode", 0, 1),
+        BitField("channel_width", 0, 1),
+        BitField("secondary_channel_offset", 0, 2, end_tot_size=-1),
+
+        # HT Operation Information: 2B
+        BitField("reserved_3", 0, 11, tot_size=-2),
+        BitField("obss_non_ht_stas_present", 0, 1),
+        BitField("reserved_2", 0, 1),
+        BitField("nongreenfield_ht_stas_present", 0, 1),
+        BitField("ht_protection", 0, 2, end_tot_size=-2),
+
+        # HT Operation Information: 2B
+        BitField("reserved_4", 0, 10, tot_size=-2),
+        BitField("pco_phase", 0, 1),
+        BitField("pco_active", 0, 1),
+        BitField("lsig_txop_protection_full_support", 0, 1),
+        BitField("stbc_beacon", 0, 1),
+        BitField("dual_cts_protection", 0, 1),
+        BitField("dual_beacon", 0, 1, end_tot_size=-2),
+
+        StrFixedLenField("basic_mcs_set", b"\x00" * 16, 16),
+    ]
+
+
+# 802.11be D7.0 9.4.2.311
+
+class Dot11EHTOperationInfo(Packet):
+    name = "802.11 EHT Operation Information"
+    fields_desc = [
+        BitField("reserved", 0, 5, tot_size=-1),
+        BitField("channel_width", 0, 3, end_tot_size=-1),
+        ByteField("channel_center0", 0),
+        ByteField("channel_center1", 0),
+    ]
+
+    def extract_padding(self, s):
+        return b"", s
+
+
+# 802.11be D7.0 9.4.2.311
+
+class Dot11EltEHTOperation(Dot11EltExtension):
+    name = "802.11 EHT Operation"
+    match_subclass = True
+    ID = 255
+    ext_ID = 106
+    fields_desc = Dot11EltExtension.fields_desc + [
+        # EHT Operation Parameters: 1B
+        BitField("reserved", 0, 2, tot_size=-1),
+        BitField("group_addressed_bu_indication_exponent", 0, 2),
+        BitField("group_addressed_bu_indication_limit", 0, 1),
+        BitField("eht_default_pe_duration", 0, 1),
+        BitField("disabled_subchannel_bitmap_present", 0, 1),
+        BitField(
+            "eht_operation_information_present",
+            0,
+            1,
+            end_tot_size=-1
+        ),
+
+        LEIntField("basic_eht_mcs_and_nss_set", 0),
+
+        ConditionalField(
+            PacketField(
+                "eht_operation_info",
+                Dot11EHTOperationInfo(),
+                Dot11EHTOperationInfo,
+            ),
+            lambda p: (
+                p.eht_operation_information_present == 1 and
+                (p.len is None or p.len >= 9)
+            )),
+
+        ConditionalField(
+            LEShortField("disabled_subchannel_bitmap", 0),
+            lambda p: (
+                p.eht_operation_information_present == 1 and
+                p.disabled_subchannel_bitmap_present == 1 and
+                (p.len is None or p.len >= 11)
+            )),
+    ]
+
+
+Dot11EltEHTOperation.register_variant(106)
 
 
 ######################
@@ -1463,7 +1849,13 @@ class Dot11Auth(_Dot11EltUtils):
                    LEShortEnumField("status", 0, status_code)]
 
     def answers(self, other):
-        if self.seqnum == other.seqnum + 1:
+        if self.algo != other.algo:
+            return 0
+
+        if (
+            self.seqnum == other.seqnum + 1 or
+            (self.algo == 3 and self.seqnum == other.seqnum)
+        ):
             return 1
         return 0
 
@@ -1475,6 +1867,423 @@ class Dot11Deauth(Packet):
 
 class Dot11Ack(Packet):
     name = "802.11 Ack packet"
+
+
+# 802.11-2016 9.4.1.11
+
+class Dot11Action(Packet):
+    name = "802.11 Action"
+    fields_desc = [
+        ByteEnumField("category", 0x00, {
+            0x00: "Spectrum Management",
+            0x01: "QoS",
+            0x02: "DLS",
+            0x03: "Block",
+            0x04: "Public",
+            0x05: "Radio Measurement",
+            0x06: "Fast BSS Transition",
+            0x07: "HT",
+            0x08: "SA Query",
+            0x09: "Protected Dual of Public Action",
+            0x0A: "WNM",
+            0x0B: "Unprotected WNM",
+            0x0C: "TDLS",
+            0x0D: "Mesh",
+            0x0E: "Multihop",
+            0x0F: "Self-protected",
+            0x10: "DMG",
+            0x11: "Reserved Wi-Fi Alliance",
+            0x12: "Fast Session Transfer",
+            0x13: "Robust AV Streaming",
+            0x14: "Unprotected DMG",
+            0x15: "VHT"
+        })
+    ]
+
+
+# 802.11-2016 9.6.14.1
+
+class Dot11WNM(Packet):
+    name = "802.11 WNM Action"
+    fields_desc = [
+        ByteEnumField("action", 0x00, {
+            0x00: "Event Request",
+            0x01: "Event Report",
+            0x02: "Diagnostic Request",
+            0x03: "Diagnostic Report",
+            0x04: "Location Configuration Request",
+            0x05: "Location Configuration Response",
+            0x06: "BSS Transition Management Query",
+            0x07: "BSS Transition Management Request",
+            0x08: "BSS Transition Management Response",
+            0x09: "FMS Request",
+            0x0A: "FMS Response",
+            0x0B: "Collocated Interference Request",
+            0x0C: "Collocated Interference Report",
+            0x0D: "TFS Request",
+            0x0E: "TFS Response",
+            0x0F: "TFS Notify",
+            0x10: "WNM Sleep Mode Request",
+            0x11: "WNM Sleep Mode Response",
+            0x12: "TIM Broadcast Request",
+            0x13: "TIM Broadcast Response",
+            0x14: "QoS Traffic Capability Update",
+            0x15: "Channel Usage Request",
+            0x16: "Channel Usage Response",
+            0x17: "DMS Request",
+            0x18: "DMS Response",
+            0x19: "Timing Measurement Request",
+            0x1A: "WNM Notification Request",
+            0x1B: "WNM Notification Response",
+            0x1C: "WNM-Notify Response"
+        })
+    ]
+
+
+# 802.11-2016 9.4.2.37
+
+class SubelemTLV(Packet):
+    fields_desc = [
+        ByteField("type", 0),
+        LEFieldLenField("len", None, fmt="B", length_of="value"),
+        FieldListField(
+            "value",
+            [],
+            ByteField('', 0),
+            length_from=lambda p: p.len
+        )
+    ]
+
+
+class BSSTerminationDuration(Packet):
+    name = "BSS Termination Duration"
+    fields_desc = [
+        ByteField("id", 4),
+        ByteField("len", 10),
+        LELongField("TSF", 0),
+        LEShortField("duration", 0)
+    ]
+
+    def extract_padding(self, s):
+        return "", s
+
+
+class NeighborReport(Packet):
+    name = "Neighbor Report"
+    fields_desc = [
+        ByteField("type", 0),
+        ByteField("len", 13),
+        MACField("BSSID", ETHER_ANY),
+        # BSSID Information
+        BitField("AP_reach", 0, 2, tot_size=-4),
+        BitField("security", 0, 1),
+        BitField("key_scope", 0, 1),
+        BitField("capabilities", 0, 6),
+        BitField("mobility", 0, 1),
+        BitField("HT", 0, 1),
+        BitField("VHT", 0, 1),
+        BitField("FTM", 0, 1),
+        BitField("reserved", 0, 18, end_tot_size=-4),
+        # BSSID Information end
+        ByteField("op_class", 0),
+        ByteField("channel", 0),
+        ByteField("phy_type", 0),
+        ConditionalField(
+            PacketListField(
+                "subelems",
+                SubelemTLV(),
+                SubelemTLV,
+                length_from=lambda p: p.len - 13
+            ),
+            lambda p: p.len > 13
+        )
+    ]
+
+
+# 802.11-2016 9.6.14.9
+
+btm_request_mode = [
+    "Preferred_Candidate_List_Included",
+    "Abridged",
+    "Disassociation_Imminent",
+    "BSS_Termination_Included",
+    "ESS_Disassociation_Imminent"
+]
+
+
+class Dot11BSSTMRequest(Packet):
+    name = "BSS Transition Management Request"
+    fields_desc = [
+        ByteField("token", 0),
+        FlagsField("mode", 0, 8, btm_request_mode),
+        LEShortField("disassociation_timer", 0),
+        ByteField("validity_interval", 0),
+        ConditionalField(
+            PacketField(
+                "termination_duration",
+                BSSTerminationDuration(),
+                BSSTerminationDuration
+            ),
+            lambda p: p.mode and p.mode.BSS_Termination_Included
+        ),
+        ConditionalField(
+            ByteField("url_len", 0),
+            lambda p: p.mode and p.mode.ESS_Disassociation_Imminent
+        ),
+        ConditionalField(
+            StrLenField("url", "", length_from=lambda p: p.url_len),
+            lambda p: p.mode and p.mode.ESS_Disassociation_Imminent != 0
+        ),
+        ConditionalField(
+            PacketListField(
+                "neighbor_report",
+                NeighborReport(),
+                NeighborReport
+            ),
+            lambda p: p.mode and p.mode.Preferred_Candidate_List_Included
+        )
+    ]
+
+
+# 802.11-2016 9.6.14.10
+
+btm_status_code = [
+    "Accept",
+    "Reject-Unspecified_reject_reason",
+    "Reject-Insufficient_Beacon_or_Probe_Response_frames",
+    "Reject-Insufficient_available_capacity_from_all_candidates",
+    "Reject-BSS_termination_undesired",
+    "Reject-BSS_termination_delay_requested",
+    "Reject-STA_BSS_Transition_Candidate_List_provided",
+    "Reject-No_suitable_BSS_transition_candidates",
+    "Reject-Leaving_ESS"
+]
+
+
+class Dot11BSSTMResponse(Packet):
+    name = "BSS Transition Management Response"
+    fields_desc = [
+        ByteField("token", 0),
+        ByteEnumField("status", 0, btm_status_code),
+        ByteField("termination_delay", 0),
+        ConditionalField(
+            MACField("target", ETHER_ANY),
+            lambda p: p.status == 0
+        ),
+        ConditionalField(
+            PacketListField(
+                "neighbor_report",
+                NeighborReport(),
+                NeighborReport
+            ),
+            lambda p: p.status == 6
+        )
+    ]
+
+
+# 802.11-2016 9.6.2.1
+
+class Dot11SpectrumManagement(Packet):
+    name = "802.11 Spectrum Management Action"
+    fields_desc = [
+        ByteEnumField("action", 0x00, {
+            0x00: "Measurement Request",
+            0x01: "Measurement Report",
+            0x02: "TPC Request",
+            0x03: "TPC Report",
+            0x04: "Channel Switch Announcement",
+        })
+    ]
+
+
+# 802.11-2016 9.6.2.6
+
+class Dot11CSA(Packet):
+    name = "Channel Switch Announcement Frame"
+    fields_desc = [
+        PacketField("CSA", Dot11EltCSA(), Dot11EltCSA),
+    ]
+
+
+# 802.11-2020 9.4.2.20, 9.4.2.21
+_dot11_measurement_type = {
+    5: "Beacon",
+}
+
+
+# 802.11-2020 9.6.6.1
+
+class Dot11RadioMeasurement(Packet):
+    name = "802.11 Radio Measurement Action"
+    fields_desc = [
+        ByteEnumField("action", 0x00, {
+            0x00: "Radio Measurement Request",
+            0x01: "Radio Measurement Report",
+            0x02: "Link Measurement Request",
+            0x03: "Link Measurement Report",
+            0x04: "Neighbor Report Request",
+            0x05: "Neighbor Report Response",
+        })
+    ]
+
+
+# 802.11-2020 9.4.2.20.7
+
+class Dot11RadioMeasurementBeaconRequest(Packet):
+    name = "802.11 Radio Measurement Beacon Request"
+    fields_desc = [
+        ByteField("op_class", 0),
+        ByteField("channel", 0),
+        LEShortField("randomization_interval", 0),
+        LEShortField("measurement_duration", 0),
+        ByteField("measurement_mode", 0),
+        MACField("BSSID", ETHER_ANY),
+    ]
+
+    def extract_padding(self, s):
+        return b"", s
+
+
+# 802.11-2020 9.6.6.2, 9.4.2.20
+
+class Dot11RadioMeasurementRequest(Packet):
+    name = "802.11 Radio Measurement Request"
+    fields_desc = [
+        ByteField("token", 0),
+        LEShortField("repetitions", 0),
+        ByteEnumField("ID", 38, _dot11_id_enum),
+        ByteField("len", 16),
+        ByteField("measurement_token", 0),
+        # Measurement Request Mode
+        BitField("reserved", 0, 3),
+        BitField("duration_mandatory", 0, 1),
+        BitField("report", 0, 1),
+        BitField("request", 0, 1),
+        BitField("enable", 0, 1),
+        BitField("parallel", 0, 1),
+        ByteEnumField("measurement_request_type", 5,
+                      _dot11_measurement_type),
+        # Only Beacon requests are specialized for now. Other measurement
+        # request types stay raw instead of being mis-dissected.
+        ConditionalField(
+            PacketField(
+                "measurement_request",
+                Dot11RadioMeasurementBeaconRequest(),
+                Dot11RadioMeasurementBeaconRequest
+            ),
+            lambda p: p.measurement_request_type == 5
+        ),
+        ConditionalField(
+            StrLenField(
+                "measurement_request_data",
+                b"",
+                length_from=lambda p: max(p.len - 3, 0)
+            ),
+            lambda p: p.measurement_request_type != 5
+        ),
+        ConditionalField(
+            PacketListField(
+                "subelems",
+                [],
+                SubelemTLV,
+                length_from=lambda p: max(p.len - 16, 0)
+            ),
+            lambda p: p.measurement_request_type == 5 and p.len > 16
+        )
+    ]
+
+
+# 802.11-2020 9.4.2.21.7
+
+class Dot11RadioMeasurementBeaconReport(Packet):
+    name = "802.11 Radio Measurement Beacon Report"
+    fields_desc = [
+        ByteField("op_class", 0),
+        ByteField("channel", 0),
+        LELongField("measurement_start_time", 0),
+        LEShortField("measurement_duration", 0),
+        # Reported Frame Information
+        BitField("reported_frame_type", 0, 1),
+        BitField("condensed_phy", 0, 7),
+        ByteField("RCPI", 0),
+        ByteField("RSNI", 0),
+        MACField("BSSID", ETHER_ANY),
+        ByteField("antenna_id", 0),
+        LEIntField("parent_tsf", 0),
+    ]
+
+    def extract_padding(self, s):
+        return b"", s
+
+
+# 802.11-2020 9.6.6.3, 9.4.2.21
+
+class Dot11RadioMeasurementReport(Packet):
+    name = "802.11 Radio Measurement Report"
+    fields_desc = [
+        ByteField("token", 0),
+        ByteEnumField("ID", 39, _dot11_id_enum),
+        ByteField("len", 29),
+        ByteField("measurement_token", 0),
+        # Measurement Report Mode
+        BitField("reserved", 0, 5),
+        BitField("refused", 0, 1),
+        BitField("incapable", 0, 1),
+        BitField("late", 0, 1),
+        ByteEnumField("measurement_report_type", 5,
+                      _dot11_measurement_type),
+        # Only successful Beacon reports are specialized for now. Other or
+        # unsuccessful measurement report bodies stay raw.
+        ConditionalField(
+            PacketField(
+                "measurement_report",
+                Dot11RadioMeasurementBeaconReport(),
+                Dot11RadioMeasurementBeaconReport
+            ),
+            lambda p: (
+                p.measurement_report_type == 5 and
+                p.late == 0 and
+                p.incapable == 0 and
+                p.refused == 0
+            )
+        ),
+        ConditionalField(
+            StrLenField(
+                "measurement_report_data",
+                b"",
+                length_from=lambda p: max(p.len - 3, 0)
+            ),
+            lambda p: (
+                not (
+                    p.measurement_report_type == 5 and
+                    p.late == 0 and
+                    p.incapable == 0 and
+                    p.refused == 0
+                )
+            )
+        ),
+        ConditionalField(
+            PacketListField(
+                "subelems",
+                [],
+                SubelemTLV,
+                length_from=lambda p: max(p.len - 29, 0)
+            ),
+            lambda p: (
+                p.measurement_report_type == 5 and
+                p.late == 0 and
+                p.incapable == 0 and
+                p.refused == 0 and
+                p.len > 29
+            )
+        )
+    ]
+
+
+class Dot11S1GBeacon(_Dot11EltUtils):
+    name = "802.11 S1G Beacon"
+    fields_desc = [LEIntField("timestamp", 0),
+                   ByteField("change_seq", 0)]
 
 
 ###################
@@ -1494,10 +2303,10 @@ class Dot11Encrypted(Packet):
         KEY_EXTIV = 0x20
         EXTIV_LEN = 8
         if _pkt and len(_pkt) >= 3:
-            if (orb(_pkt[3]) & KEY_EXTIV) and (len(_pkt) >= EXTIV_LEN):
-                if orb(_pkt[1]) == ((orb(_pkt[0]) | 0x20) & 0x7f):  # IS_TKIP
+            if (_pkt[3] & KEY_EXTIV) and (len(_pkt) >= EXTIV_LEN):
+                if _pkt[1] == ((_pkt[0] | 0x20) & 0x7f):  # IS_TKIP
                     return Dot11TKIP
-                elif orb(_pkt[2]) == 0:  # IS_CCMP
+                elif _pkt[2] == 0:  # IS_CCMP
                     return Dot11CCMP
                 else:
                     # Unknown encryption algorithm
@@ -1521,7 +2330,7 @@ class Dot11WEP(Dot11Encrypted):
             key = conf.wepkey
         if key and conf.crypto_valid:
             d = Cipher(
-                algorithms.ARC4(self.iv + key.encode("utf8")),
+                decrepit_algorithms.ARC4(self.iv + key.encode("utf8")),
                 None,
                 default_backend(),
             ).decryptor()
@@ -1546,7 +2355,7 @@ class Dot11WEP(Dot11Encrypted):
             else:
                 icv = p[4:8]
             e = Cipher(
-                algorithms.ARC4(self.iv + key.encode("utf8")),
+                decrepit_algorithms.ARC4(self.iv + key.encode("utf8")),
                 None,
                 default_backend(),
             ).encryptor()
@@ -1617,6 +2426,8 @@ bind_top_down(Dot11, Dot11QoS, type=2, subtype=0xc)
 bind_layers(PrismHeader, Dot11,)
 bind_layers(Dot11, LLC, type=2)
 bind_layers(Dot11QoS, LLC,)
+
+# 802.11-2016 9.2.4.1.3 Type and Subtype subfields
 bind_layers(Dot11, Dot11AssoReq, subtype=0, type=0)
 bind_layers(Dot11, Dot11AssoResp, subtype=1, type=0)
 bind_layers(Dot11, Dot11ReassoReq, subtype=2, type=0)
@@ -1624,12 +2435,15 @@ bind_layers(Dot11, Dot11ReassoResp, subtype=3, type=0)
 bind_layers(Dot11, Dot11ProbeReq, subtype=4, type=0)
 bind_layers(Dot11, Dot11ProbeResp, subtype=5, type=0)
 bind_layers(Dot11, Dot11Beacon, subtype=8, type=0)
+bind_layers(Dot11, Dot11S1GBeacon, subtype=1, type=3)
 bind_layers(Dot11, Dot11ATIM, subtype=9, type=0)
 bind_layers(Dot11, Dot11Disas, subtype=10, type=0)
 bind_layers(Dot11, Dot11Auth, subtype=11, type=0)
 bind_layers(Dot11, Dot11Deauth, subtype=12, type=0)
+bind_layers(Dot11, Dot11Action, subtype=13, type=0)
 bind_layers(Dot11, Dot11Ack, subtype=13, type=1)
 bind_layers(Dot11Beacon, Dot11Elt,)
+bind_layers(Dot11S1GBeacon, Dot11Elt,)
 bind_layers(Dot11AssoReq, Dot11Elt,)
 bind_layers(Dot11AssoResp, Dot11Elt,)
 bind_layers(Dot11ReassoReq, Dot11Elt,)
@@ -1640,6 +2454,14 @@ bind_layers(Dot11Auth, Dot11Elt,)
 bind_layers(Dot11Elt, Dot11Elt,)
 bind_layers(Dot11TKIP, conf.raw_layer)
 bind_layers(Dot11CCMP, conf.raw_layer)
+bind_layers(Dot11Action, Dot11SpectrumManagement, category=0x00)
+bind_layers(Dot11SpectrumManagement, Dot11CSA, action=4)
+bind_layers(Dot11Action, Dot11WNM, category=0x0A)
+bind_layers(Dot11WNM, Dot11BSSTMRequest, action=7)
+bind_layers(Dot11WNM, Dot11BSSTMResponse, action=8)
+bind_layers(Dot11Action, Dot11RadioMeasurement, category=0x05)
+bind_layers(Dot11RadioMeasurement, Dot11RadioMeasurementRequest, action=0)
+bind_layers(Dot11RadioMeasurement, Dot11RadioMeasurementReport, action=1)
 
 
 conf.l2types.register(DLT_IEEE802_11, Dot11)
@@ -1699,10 +2521,12 @@ iwconfig wlan0 mode managed
 
     def make_reply(self, p):
         ip = p.getlayer(IP)
+        if ip is None:
+            return
         tcp = p.getlayer(TCP)
         pay = raw(tcp.payload)
-        del(p.payload.payload.payload)
-        p.FCfield = "from-DS"
+        p[IP].underlayer.remove_payload()
+        p.FCfield = "from_DS"
         p.addr1, p.addr2 = p.addr2, p.addr1
         p /= IP(src=ip.dst, dst=ip.src)
         p /= TCP(sport=tcp.dport, dport=tcp.sport,

@@ -1,7 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # This file is part of Scapy
-# See http://www.secdev.org/projects/scapy for more information
+# See https://scapy.net/ for more information
 # Copyright (C) Philippe Biondi <phil@secdev.org>
-# This program is published under a GPLv2 license
 
 """
 Generators and packet meta classes.
@@ -11,25 +11,24 @@ Generators and packet meta classes.
 #  Generators  #
 ################
 
-from __future__ import absolute_import
 
 from functools import reduce
+import abc
 import operator
 import os
-import re
 import random
+import re
 import socket
+import struct
 import subprocess
 import types
 import warnings
 
 import scapy
+from scapy.error import Scapy_Exception
 from scapy.consts import WINDOWS
-import scapy.modules.six as six
 
-from scapy.modules.six.moves import range
-
-from scapy.compat import (
+from typing import (
     Any,
     Dict,
     Generic,
@@ -40,19 +39,20 @@ from scapy.compat import (
     Type,
     TypeVar,
     Union,
-    _Generic_metaclass,
     cast,
+    TYPE_CHECKING,
 )
 
-try:
-    import pyx
-except ImportError:
-    pass
+if TYPE_CHECKING:
+    try:
+        import pyx
+    except ImportError:
+        pass
+    from scapy.packet import Packet
 
 _T = TypeVar("_T")
 
 
-@six.add_metaclass(_Generic_metaclass)
 class Gen(Generic[_T]):
     __slots__ = []  # type: List[str]
 
@@ -100,97 +100,220 @@ class SetGen(Gen[_T]):
             else:
                 yield i
 
+    def __len__(self):
+        # type: () -> int
+        return self.__iterlen__()
+
     def __repr__(self):
         # type: () -> str
         return "<SetGen %r>" % self.values
 
 
-class Net(Gen[str]):
-    """Generate a list of IPs from a network address or a name"""
-    name = "ip"
-    ip_regex = re.compile(r"^(\*|[0-2]?[0-9]?[0-9](-[0-2]?[0-9]?[0-9])?)\.(\*|[0-2]?[0-9]?[0-9](-[0-2]?[0-9]?[0-9])?)\.(\*|[0-2]?[0-9]?[0-9](-[0-2]?[0-9]?[0-9])?)\.(\*|[0-2]?[0-9]?[0-9](-[0-2]?[0-9]?[0-9])?)(/[0-3]?[0-9])?$")  # noqa: E501
+class _ScopedIP(str):
+    """
+    A str that also holds extra attributes.
+    """
+    __slots__ = ["scope"]
 
-    @staticmethod
-    def _parse_digit(a, netmask):
-        # type: (str, int) -> Tuple[int, int]
-        netmask = min(8, max(netmask, 0))
-        if a == "*":
-            return (0, 256)
-        elif a.find("-") >= 0:
-            x, y = [int(d) for d in a.split('-')]
-            if x > y:
-                y = x
-            return (x & (0xff << netmask), max(y, (x | (0xff >> (8 - netmask)))) + 1)  # noqa: E501
-        else:
-            return (int(a) & (0xff << netmask), (int(a) | (0xff >> (8 - netmask))) + 1)  # noqa: E501
+    def __init__(self, _: str) -> None:
+        self.scope = None
+
+    def __repr__(self) -> str:
+        val = super(_ScopedIP, self).__repr__()
+        if self.scope is not None:
+            return "ScopedIP(%s, scope=%s)" % (val, repr(self.scope))
+        return val
+
+
+def ScopedIP(net: str, scope: Optional[Any] = None) -> _ScopedIP:
+    """
+    An str that also holds extra attributes.
+
+    Examples::
+
+        >>> ScopedIP("224.0.0.1%eth0")  # interface 'eth0'
+        >>> ScopedIP("224.0.0.1%1")  # interface index 1
+        >>> ScopedIP("224.0.0.1", scope=conf.iface)
+    """
+    if "%" in net:
+        try:
+            net, scope = net.split("%", 1)
+        except ValueError:
+            raise Scapy_Exception("Scope identifier can only be present once !")
+    if scope is not None:
+        from scapy.interfaces import resolve_iface, network_name, dev_from_index
+        try:
+            iface = dev_from_index(int(scope))
+        except (ValueError, TypeError):
+            iface = resolve_iface(scope)
+        if not iface.is_valid():
+            raise Scapy_Exception(
+                "RFC6874 scope identifier '%s' could not be resolved to a "
+                "valid interface !" % scope
+            )
+        scope = network_name(iface)
+    x = _ScopedIP(net)
+    x.scope = scope
+    return x
+
+
+class Net(Gen[str]):
+    """
+    Network object from an IP address or hostname and mask
+
+    Examples:
+
+        - With mask::
+
+            >>> list(Net("192.168.0.1/24"))
+            ['192.168.0.0', '192.168.0.1', ..., '192.168.0.255']
+
+        - With 'end'::
+
+            >>> list(Net("192.168.0.100", "192.168.0.200"))
+            ['192.168.0.100', '192.168.0.101', ..., '192.168.0.200']
+
+        - With 'scope' (for multicast)::
+
+            >>> Net("224.0.0.1%lo")
+            >>> Net("224.0.0.1", scope=conf.iface)
+    """
+    name = "Net"  # type: str
+    family = socket.AF_INET  # type: int
+    max_mask = 32  # type: int
 
     @classmethod
-    def _parse_net(cls, net):
-        # type: (str) -> Tuple[List[Tuple[int, int]], int]
-        tmp = net.split('/') + ["32"]
-        if not cls.ip_regex.match(net):
-            tmp[0] = socket.gethostbyname(tmp[0])
-        netmask = int(tmp[1])
-        ret_list = [cls._parse_digit(x, y - netmask) for (x, y) in zip(tmp[0].split('.'), [8, 16, 24, 32])]  # noqa: E501
-        return ret_list, netmask
+    def name2addr(cls, name):
+        # type: (str) -> str
+        try:
+            return next(
+                addr_port[0]
+                for family, _, _, _, addr_port in
+                socket.getaddrinfo(name, None, cls.family)
+                if family == cls.family
+            )
+        except socket.error:
+            if re.search("(^|\\.)[0-9]+-[0-9]+($|\\.)", name) is not None:
+                raise Scapy_Exception("Ranges are no longer accepted in %s()" %
+                                      cls.__name__)
+            raise
 
-    def __init__(self, net):
-        # type: (str) -> None
-        self.repr = net
-        self.parsed, self.netmask = self._parse_net(net)
+    @classmethod
+    def ip2int(cls, addr):
+        # type: (str) -> int
+        return cast(int, struct.unpack(
+            "!I", socket.inet_aton(cls.name2addr(addr))
+        )[0])
+
+    @staticmethod
+    def int2ip(val):
+        # type: (int) -> str
+        return socket.inet_ntoa(struct.pack('!I', val))
+
+    def __init__(self, net, stop=None, scope=None):
+        # type: (str, Optional[str], Optional[str]) -> None
+        if "*" in net:
+            raise Scapy_Exception("Wildcards are no longer accepted in %s()" %
+                                  self.__class__.__name__)
+        self.scope = None
+        if "%" in net or scope is not None:
+            net = ScopedIP(net, scope=scope)
+        if isinstance(net, _ScopedIP):
+            self.scope = net.scope
+        if stop is None:
+            try:
+                net, mask = net.split("/", 1)
+            except ValueError:
+                self.mask = self.max_mask  # type: Union[None, int]
+            else:
+                self.mask = int(mask)
+            self.net = net  # type: Union[None, str]
+            inv_mask = self.max_mask - self.mask
+            self.start = self.ip2int(net) >> inv_mask << inv_mask
+            self.count = 1 << inv_mask
+            self.stop = self.start + self.count - 1
+        else:
+            self.start = self.ip2int(net)
+            self.stop = self.ip2int(stop)
+            self.count = self.stop - self.start + 1
+            self.net = self.mask = None
 
     def __str__(self):
         # type: () -> str
-        return next(self.__iter__(), "")
+        return next(iter(self), "")
 
     def __iter__(self):
         # type: () -> Iterator[str]
-        for d in range(*self.parsed[3]):
-            for c in range(*self.parsed[2]):
-                for b in range(*self.parsed[1]):
-                    for a in range(*self.parsed[0]):
-                        yield "%i.%i.%i.%i" % (a, b, c, d)
+        # Python 2 won't handle huge (> sys.maxint) values in range()
+        for i in range(self.count):
+            yield ScopedIP(
+                self.int2ip(self.start + i),
+                scope=self.scope,
+            )
+
+    def __len__(self):
+        # type: () -> int
+        return self.count
 
     def __iterlen__(self):
         # type: () -> int
-        return reduce(operator.mul, ((y - x) for (x, y) in self.parsed), 1)
+        # for compatibility
+        return len(self)
 
     def choice(self):
         # type: () -> str
-        return ".".join(str(random.randint(v[0], v[1] - 1)) for v in self.parsed)  # noqa: E501
+        return ScopedIP(
+            self.int2ip(random.randint(self.start, self.stop)),
+            scope=self.scope,
+        )
 
     def __repr__(self):
         # type: () -> str
-        return "Net(%r)" % self.repr
+        scope_id_repr = ""
+        if self.scope:
+            scope_id_repr = ", scope=%s" % repr(self.scope)
+        if self.mask is not None:
+            return '%s("%s/%d"%s)' % (
+                self.__class__.__name__,
+                self.net,
+                self.mask,
+                scope_id_repr,
+            )
+        return '%s("%s", "%s"%s)' % (
+            self.__class__.__name__,
+            self.int2ip(self.start),
+            self.int2ip(self.stop),
+            scope_id_repr,
+        )
 
     def __eq__(self, other):
         # type: (Any) -> bool
-        if not other:
+        if isinstance(other, str):
+            return self == self.__class__(other)
+        if not isinstance(other, Net):
             return False
-        if hasattr(other, "parsed"):
-            p2 = other.parsed
-        else:
-            p2, nm2 = self._parse_net(other)
-        return bool(self.parsed == p2)
+        if self.family != other.family:
+            return False
+        return (self.start == other.start) and (self.stop == other.stop)
 
     def __ne__(self, other):
         # type: (Any) -> bool
         # Python 2.7 compat
         return not self == other
 
-    __hash__ = None  # type: ignore
+    def __hash__(self):
+        # type: () -> int
+        return hash(("scapy.Net", self.family, self.start, self.stop, self.scope))
 
     def __contains__(self, other):
-        # type: (Union[str, Net]) -> bool
-        if hasattr(other, "parsed"):
-            p2 = cast(Net, other).parsed
-        else:
-            p2, _ = self._parse_net(cast(str, other))
-        return all(a1 <= a2 and b1 >= b2 for (a1, b1), (a2, b2) in zip(self.parsed, p2))  # noqa: E501
-
-    def __rcontains__(self, other):
-        # type: (str) -> bool
-        return self in self.__class__(other)
+        # type: (Any) -> bool
+        if isinstance(other, int):
+            return self.start <= other <= self.stop
+        if isinstance(other, str):
+            return self.__class__(other) in self
+        if type(other) is not self.__class__:
+            return False
+        return self.start <= other.start <= other.stop <= self.stop
 
 
 class OID(Gen[str]):
@@ -238,20 +361,20 @@ class OID(Gen[str]):
 #  Packet abstract and base classes  #
 ######################################
 
-class Packet_metaclass(_Generic_metaclass):
-    def __new__(cls,  # type: ignore
+class Packet_metaclass(type):
+    def __new__(cls: Type[_T],
                 name,  # type: str
                 bases,  # type: Tuple[type, ...]
                 dct  # type: Dict[str, Any]
                 ):
-        # type: (...) -> Type['scapy.packet.Packet']
+        # type: (...) -> Type['Packet']
         if "fields_desc" in dct:  # perform resolution of references to other packets  # noqa: E501
-            current_fld = dct["fields_desc"]  # type: List[Union['scapy.fields.Field'[Any, Any], Packet_metaclass]]  # noqa: E501
-            resolved_fld = []  # type: List['scapy.fields.Field'[Any, Any]]
+            current_fld = dct["fields_desc"]  # type: List[Union[scapy.fields.Field[Any, Any], Packet_metaclass]]  # noqa: E501
+            resolved_fld = []  # type: List[scapy.fields.Field[Any, Any]]
             for fld_or_pkt in current_fld:
                 if isinstance(fld_or_pkt, Packet_metaclass):
                     # reference to another fields_desc
-                    for pkt_fld in fld_or_pkt.fields_desc:  # type: ignore
+                    for pkt_fld in fld_or_pkt.fields_desc:
                         resolved_fld.append(pkt_fld)
                 else:
                     resolved_fld.append(fld_or_pkt)
@@ -259,11 +382,11 @@ class Packet_metaclass(_Generic_metaclass):
             resolved_fld = []
             for b in bases:
                 if hasattr(b, "fields_desc"):
-                    resolved_fld = b.fields_desc  # type: ignore
+                    resolved_fld = b.fields_desc
                     break
 
         if resolved_fld:  # perform default value replacements
-            final_fld = []  # type: List['scapy.fields.Field'[Any, Any]]
+            final_fld = []  # type: List[scapy.fields.Field[Any, Any]]
             names = []
             for f in resolved_fld:
                 if f.name in names:
@@ -281,7 +404,7 @@ class Packet_metaclass(_Generic_metaclass):
                 if f.name in dct:
                     f = f.copy()
                     f.default = dct[f.name]
-                    del(dct[f.name])
+                    del dct[f.name]
                 final_fld.append(f)
 
             dct["fields_desc"] = final_fld
@@ -292,7 +415,21 @@ class Packet_metaclass(_Generic_metaclass):
                 dct["_%s" % attr] = dct.pop(attr)
             except KeyError:
                 pass
-        newcls = type.__new__(cls, name, bases, dct)
+        # Build and inject signature
+        try:
+            # Py3 only
+            import inspect
+            dct["__signature__"] = inspect.Signature([
+                inspect.Parameter("_pkt", inspect.Parameter.POSITIONAL_ONLY),
+            ] + [
+                inspect.Parameter(f.name,
+                                  inspect.Parameter.KEYWORD_ONLY,
+                                  default=f.default)
+                for f in dct["fields_desc"]
+            ])
+        except (ImportError, AttributeError, KeyError):
+            pass
+        newcls = cast(Type['Packet'], type.__new__(cls, name, bases, dct))
         # Note: below can't be typed because we use attributes
         # created dynamically..
         newcls.__all_slots__ = set(  # type: ignore
@@ -306,40 +443,40 @@ class Packet_metaclass(_Generic_metaclass):
         )
 
         if hasattr(newcls, "register_variant"):
-            newcls.register_variant()  # type: ignore
-        for f in newcls.fields_desc:  # type: ignore
-            if hasattr(f, "register_owner"):
-                f.register_owner(newcls)
+            newcls.register_variant()
+        for _f in newcls.fields_desc:
+            if hasattr(_f, "register_owner"):
+                _f.register_owner(newcls)
         if newcls.__name__[0] != "_":
             from scapy import config
             config.conf.layers.register(newcls)
         return newcls
 
     def __getattr__(self, attr):
-        # type: (str) -> 'scapy.fields.Field'[Any, Any]
-        for k in self.fields_desc:  # type: ignore
+        # type: (str) -> Any
+        for k in self.fields_desc:
             if k.name == attr:
-                return k  # type: ignore
+                return k
         raise AttributeError(attr)
 
     def __call__(cls,
                  *args,  # type: Any
                  **kargs  # type: Any
                  ):
-        # type: (...) -> 'scapy.packet.Packet'
+        # type: (...) -> 'Packet'
         if "dispatch_hook" in cls.__dict__:
             try:
-                cls = cls.dispatch_hook(*args, **kargs)  # type: ignore
+                cls = cls.dispatch_hook(*args, **kargs)
             except Exception:
                 from scapy import config
                 if config.conf.debug_dissector:
                     raise
-                cls = config.conf.raw_layer  # type: ignore
+                cls = config.conf.raw_layer
         i = cls.__new__(
             cls,  # type: ignore
             cls.__name__,
             cls.__bases__,
-            cls.__dict__
+            cls.__dict__  # type: ignore
         )
         i.__init__(*args, **kargs)
         return i  # type: ignore
@@ -347,22 +484,22 @@ class Packet_metaclass(_Generic_metaclass):
 
 # Note: see compat.py for an explanation
 
-class Field_metaclass(_Generic_metaclass):
-    def __new__(cls,  # type: ignore
+class Field_metaclass(type):
+    def __new__(cls: Type[_T],
                 name,  # type: str
                 bases,  # type: Tuple[type, ...]
                 dct  # type: Dict[str, Any]
                 ):
-        # type: (...) -> Type['scapy.fields.Field'[Any, Any]]
+        # type: (...) -> Type[_T]
         dct.setdefault("__slots__", [])
-        newcls = super(Field_metaclass, cls).__new__(cls, name, bases, dct)
-        return newcls
+        newcls = type.__new__(cls, name, bases, dct)
+        return newcls  # type: ignore
 
 
 PacketList_metaclass = Field_metaclass
 
 
-class BasePacket(Gen['scapy.packet.Packet']):
+class BasePacket(Gen['Packet']):
     __slots__ = []  # type: List[str]
 
 
@@ -375,8 +512,9 @@ class BasePacketList(Gen[_T]):
 
 
 class _CanvasDumpExtended(object):
-    def canvas_dump(self, **kwargs):
-        # type: (**Any) -> 'pyx.canvas.canvas'
+    @abc.abstractmethod
+    def canvas_dump(self, layer_shift=0, rebuild=1):
+        # type: (int, int) -> pyx.canvas.canvas
         pass
 
     def psdump(self, filename=None, **kargs):
@@ -393,11 +531,9 @@ class _CanvasDumpExtended(object):
         from scapy.utils import get_temp_file, ContextManagerSubprocess
         canvas = self.canvas_dump(**kargs)
         if filename is None:
-            fname = cast(str, get_temp_file(
-                autoext=kargs.get("suffix", ".eps")
-            ))
+            fname = get_temp_file(autoext=kargs.get("suffix", ".eps"))
             canvas.writeEPSfile(fname)
-            if WINDOWS and conf.prog.psreader is None:
+            if WINDOWS and not conf.prog.psreader:
                 os.startfile(fname)
             else:
                 with ContextManagerSubprocess(conf.prog.psreader):
@@ -420,11 +556,9 @@ class _CanvasDumpExtended(object):
         from scapy.utils import get_temp_file, ContextManagerSubprocess
         canvas = self.canvas_dump(**kargs)
         if filename is None:
-            fname = cast(str, get_temp_file(
-                autoext=kargs.get("suffix", ".pdf")
-            ))
+            fname = get_temp_file(autoext=kargs.get("suffix", ".pdf"))
             canvas.writePDFfile(fname)
-            if WINDOWS and conf.prog.pdfreader is None:
+            if WINDOWS and not conf.prog.pdfreader:
                 os.startfile(fname)
             else:
                 with ContextManagerSubprocess(conf.prog.pdfreader):
@@ -447,11 +581,9 @@ class _CanvasDumpExtended(object):
         from scapy.utils import get_temp_file, ContextManagerSubprocess
         canvas = self.canvas_dump(**kargs)
         if filename is None:
-            fname = cast(str, get_temp_file(
-                autoext=kargs.get("suffix", ".svg")
-            ))
+            fname = get_temp_file(autoext=kargs.get("suffix", ".svg"))
             canvas.writeSVGfile(fname)
-            if WINDOWS and conf.prog.svgreader is None:
+            if WINDOWS and not conf.prog.svgreader:
                 os.startfile(fname)
             else:
                 with ContextManagerSubprocess(conf.prog.svgreader):

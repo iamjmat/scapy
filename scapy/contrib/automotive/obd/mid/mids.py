@@ -1,16 +1,19 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # This file is part of Scapy
-# See http://www.secdev.org/projects/scapy for more information
+# See https://scapy.net/ for more information
 # Copyright (C) Andreas Korb <andreas.d.korb@gmail.com>
 # Copyright (C) Nils Weiss <nils@we155.de>
-# This program is published under a GPLv2 license
 
 # scapy.contrib.status = skip
 
-from scapy.fields import FlagsField, ScalingField, ByteEnumField, \
-    MultipleTypeField, ShortField, ShortEnumField, PacketListField
+from scapy.fields import (
+    ConditionalField, FlagsField, ScalingField, ByteEnumField,
+    XByteEnumField, MultipleTypeField, ShortField, ShortEnumField,
+    PacketListField
+)
 from scapy.packet import Packet, bind_layers
 from scapy.contrib.automotive.obd.packet import OBD_Packet
-from scapy.contrib.automotive.obd.services import OBD_S06
+from scapy.contrib.automotive.obd.services import OBD_S06, _OBD_SERVICES, _obd_slm
 
 
 def _unit_and_scaling_fields(name):
@@ -457,11 +460,12 @@ class OBD_S06_PR_Record(Packet):
 class OBD_S06_PR(Packet):
     name = "On-Board monitoring IDs"
     fields_desc = [
+        ConditionalField(XByteEnumField('service', 0x46, _OBD_SERVICES), _obd_slm),
         PacketListField("data_records", [], OBD_S06_PR_Record)
     ]
 
     def answers(self, other):
-        return other.__class__ == OBD_S06 \
+        return isinstance(other, OBD_S06) \
             and all(r.mid in other.mid for r in self.data_records)
 
 

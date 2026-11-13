@@ -1,7 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # This file is part of Scapy
-# See http://www.secdev.org/projects/scapy for more information
+# See https://scapy.net/ for more information
 # Copyright (C) Philippe Biondi <phil@secdev.org>
-# This program is published under a GPLv2 license
 
 """
 This file contains constants
@@ -9,6 +9,20 @@ This file contains constants
 
 from sys import byteorder, platform, maxsize
 import platform as platform_lib
+
+__all__ = [
+    "LINUX",
+    "OPENBSD",
+    "FREEBSD",
+    "NETBSD",
+    "DARWIN",
+    "SOLARIS",
+    "WINDOWS",
+    "WINDOWS_XP",
+    "BSD",
+    "IS_64BITS",
+    "BIG_ENDIAN",
+]
 
 LINUX = platform.startswith("linux")
 OPENBSD = platform.startswith("openbsd")

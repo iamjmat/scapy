@@ -1,22 +1,8 @@
-# This file is part of Scapy.
-# See http://www.secdev.org/projects/scapy for more information.
-#
-# Scapy is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 2 of the License, or
-# (at your option) any later version.
-#
-# Scapy is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Scapy.  If not, see <http://www.gnu.org/licenses/>.
-#
+# SPDX-License-Identifier: GPL-2.0-or-later
+# This file is part of Scapy
+# See https://scapy.net/ for more information
 # Copyright (C) 2020 Rahul Jadhav <nyrahul@gmail.com>
 
-# RFC 6550
 # scapy.contrib.description = Routing Protocol for LLNs (RPL)
 # scapy.contrib.status = loads
 
@@ -38,11 +24,12 @@ draft-ietf-roll-efficient-npdao-17 - Efficient Route Invalidation
 """
 
 
+from scapy.config import conf
 from scapy.packet import Packet, bind_layers
 from scapy.fields import ByteEnumField, ByteField, IP6Field, ShortField, \
     BitField, BitEnumField, FieldLenField, StrLenField, IntField, \
     ConditionalField
-from scapy.layers.inet6 import ICMPv6RPL, icmp6ndraprefs, _IP6PrefixField
+from scapy.layers.inet6 import ICMPv6RPL, icmp6ndraprefs
 
 
 # https://www.iana.org/assignments/rpl/rpl.xhtml#mop
@@ -70,6 +57,39 @@ RPLOPTSSTR = {0: "Pad1",
 class _RPLGuessOption(Packet):
     name = "Dummy RPL Option class"
 
+    def guess_payload_class(self, payload):
+        return RPLOPTS.get(payload[0], conf.raw_layer)
+
+
+class _RPLPrefixField(IP6Field):
+    """
+    IPv6 address or prefix filling the rest of an option. RPL option
+    lengths count octets (RFC 6550 Section 6.7.1), so the field size is
+    length_from(pkt) octets, not 8-octet units as in IPv6 ND.
+    """
+    __slots__ = ["length_from"]
+
+    def __init__(self, name, default, length_from):
+        IP6Field.__init__(self, name, default)
+        self.length_from = length_from
+
+    def i2m(self, pkt, x):
+        if pkt.len is None:
+            return b"" if x is None else IP6Field.i2m(self, pkt, x)
+        tmp_len = max(self.length_from(pkt), 0)
+        return IP6Field.i2m(self, pkt, x)[:tmp_len].ljust(tmp_len, b"\x00")
+
+    def i2len(self, pkt, x):
+        return len(self.i2m(pkt, x))
+
+    def addfield(self, pkt, s, val):
+        return s + self.i2m(pkt, val)
+
+    def getfield(self, pkt, s):
+        tmp_len = max(self.length_from(pkt), 0)
+        addr = s[:tmp_len][:16].ljust(16, b"\x00")
+        return s[tmp_len:], self.m2i(pkt, addr)
+
 
 class RPLOptRIO(_RPLGuessOption):
     """
@@ -84,7 +104,8 @@ class RPLOptRIO(_RPLGuessOption):
                    BitEnumField("prf", 0, 2, icmp6ndraprefs),
                    BitField("res2", 0, 3),
                    IntField("rtlifetime", 0xffffffff),
-                   _IP6PrefixField("prefix", None)]
+                   _RPLPrefixField("prefix", None,
+                                   length_from=lambda pkt: pkt.len - 6)]
 
 
 class RPLOptDODAGConfig(_RPLGuessOption):
@@ -118,7 +139,8 @@ class RPLOptTgt(_RPLGuessOption):
                                  adjust=lambda pkt, x: x + 2),
                    ByteField("flags", 0),
                    ByteField("plen", 0),
-                   _IP6PrefixField("prefix", None)]
+                   _RPLPrefixField("prefix", None,
+                                   length_from=lambda pkt: pkt.len - 2)]
 
 
 class RPLOptTIO(_RPLGuessOption):
@@ -134,7 +156,8 @@ class RPLOptTIO(_RPLGuessOption):
                    ByteField("pathcontrol", 0),
                    ByteField("pathseq", 0),
                    ByteField("pathlifetime", 0xff),
-                   _IP6PrefixField("parentaddr", None)]
+                   _RPLPrefixField("parentaddr", None,
+                                   length_from=lambda pkt: pkt.len - 4)]
 
 
 class RPLOptSolInfo(_RPLGuessOption):
@@ -216,18 +239,7 @@ RPLOPTS = {0: RPLOptPad1,
 # RPL Control Message Handling
 
 
-class _RPLGuessMsgType(Packet):
-    name = "Dummy RPL Message class"
-
-    def guess_payload_class(self, payload):
-        if isinstance(payload, str):
-            otype = ord(payload[0])
-        else:
-            otype = payload[0]
-        return RPLOPTS.get(otype)
-
-
-class RPLDIS(_RPLGuessMsgType, _RPLGuessOption):
+class RPLDIS(_RPLGuessOption):
     """
     Control Message: DODAG Information Solicitation (DIS)
     """
@@ -236,7 +248,7 @@ class RPLDIS(_RPLGuessMsgType, _RPLGuessOption):
                    ByteField("reserved", 0)]
 
 
-class RPLDIO(_RPLGuessMsgType, _RPLGuessOption):
+class RPLDIO(_RPLGuessOption):
     """
     Control Message: DODAG Information Object (DIO)
     """
@@ -254,7 +266,7 @@ class RPLDIO(_RPLGuessMsgType, _RPLGuessOption):
                    IP6Field("dodagid", "::1")]
 
 
-class RPLDAO(_RPLGuessMsgType, _RPLGuessOption):
+class RPLDAO(_RPLGuessOption):
     """
     Control Message: Destination Advertisement Object (DAO)
     """
@@ -269,7 +281,7 @@ class RPLDAO(_RPLGuessMsgType, _RPLGuessOption):
                                     lambda pkt: pkt.D == 1)]
 
 
-class RPLDAOACK(_RPLGuessMsgType, _RPLGuessOption):
+class RPLDAOACK(_RPLGuessOption):
     """
     Control Message: Destination Advertisement Object Acknowledgement (DAOACK)
     """
@@ -284,7 +296,7 @@ class RPLDAOACK(_RPLGuessMsgType, _RPLGuessOption):
 
 
 # https://datatracker.ietf.org/doc/draft-ietf-roll-efficient-npdao/
-class RPLDCO(_RPLGuessMsgType, _RPLGuessOption):
+class RPLDCO(_RPLGuessOption):
     """
     Control Message: Destination Cleanup Object (DCO)
     """
@@ -300,7 +312,7 @@ class RPLDCO(_RPLGuessMsgType, _RPLGuessOption):
 
 
 # https://datatracker.ietf.org/doc/draft-ietf-roll-efficient-npdao/
-class RPLDCOACK(_RPLGuessMsgType, _RPLGuessOption):
+class RPLDCOACK(_RPLGuessOption):
     """
     Control Message: Destination Cleanup Object Acknowledgement (DCOACK)
     """

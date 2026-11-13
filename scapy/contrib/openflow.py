@@ -1,21 +1,23 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # This file is part of Scapy
-# See http://www.secdev.org/projects/scapy for more information
+# See https://scapy.net/ for more information
 # Copyright (C) Philippe Biondi <phil@secdev.org>
-# This program is published under a GPLv2 license
-
 # Copyright (C) 2014 Maxence Tury <maxence.tury@ssi.gouv.fr>
-# OpenFlow is an open standard used in SDN deployments.
-# Based on OpenFlow v1.0.1
-# Specifications can be retrieved from https://www.opennetworking.org/
+
+"""
+OpenFlow v1.0.1
+
+OpenFlow is an open standard used in SDN deployments.
+Specifications can be retrieved from https://www.opennetworking.org/
+"""
 
 # scapy.contrib.description = Openflow v1.0
 # scapy.contrib.status = loads
 
-from __future__ import absolute_import
 import struct
 
 
-from scapy.compat import chb, orb, raw
+from scapy.compat import chb, raw
 from scapy.config import conf
 from scapy.error import warning
 from scapy.fields import BitEnumField, BitField, ByteEnumField, ByteField, FieldLenField, FlagsField, IntEnumField, IntField, IPField, LongField, MACField, PacketField, PacketListField, ShortEnumField, ShortField, StrFixedLenField, X3BytesField, XBitField, XByteField, XIntField, XShortField  # noqa: E501
@@ -23,7 +25,6 @@ from scapy.layers.l2 import Ether
 from scapy.layers.inet import TCP
 from scapy.packet import Packet, Raw, bind_bottom_up, bind_top_down
 from scapy.utils import binrepr
-import scapy.modules.six as six
 
 
 # If prereq_autocomplete is True then match prerequisites will be
@@ -273,7 +274,7 @@ class OpenFlow(_ofp_header):
     @classmethod
     def dispatch_hook(cls, _pkt=None, *args, **kargs):
         if _pkt and len(_pkt) >= 2:
-            version = orb(_pkt[0])
+            version = _pkt[0]
             if version == 0x04:  # OpenFlow 1.3
                 from scapy.contrib.openflow3 import OpenFlow3
                 return OpenFlow3.dispatch_hook(_pkt, *args, **kargs)
@@ -282,20 +283,20 @@ class OpenFlow(_ofp_header):
                 # longer be used
                 # OpenFlow function may be called with a None
                 # self in OFPPacketField
-                of_type = orb(_pkt[1])
+                of_type = _pkt[1]
                 if of_type == 1:
-                    err_type = orb(_pkt[9])
+                    err_type = _pkt[9]
                     # err_type is a short int, but last byte is enough
                     if err_type == 255:
                         err_type = 65535
                     return ofp_error_cls[err_type]
                 elif of_type == 16:
-                    mp_type = orb(_pkt[9])
+                    mp_type = _pkt[9]
                     if mp_type == 255:
                         mp_type = 65535
                     return ofp_stats_request_cls[mp_type]
                 elif of_type == 17:
-                    mp_type = orb(_pkt[9])
+                    mp_type = _pkt[9]
                     if mp_type == 255:
                         mp_type = 65535
                     return ofp_stats_reply_cls[mp_type]
@@ -714,7 +715,7 @@ class OFPTFeaturesRequest(_ofp_header):
                    IntField("xid", 0)]
 
 
-ofp_action_types_flags = [v for v in six.itervalues(ofp_action_types)
+ofp_action_types_flags = [v for v in ofp_action_types.values()
                           if v != 'OFPAT_VENDOR']
 
 

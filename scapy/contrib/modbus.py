@@ -1,24 +1,14 @@
-# coding: utf8
-
+# SPDX-License-Identifier: GPL-2.0-or-later
 # This file is part of Scapy
-# Scapy is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 2 of the License, or
-# any later version.
-#
-# Scapy is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Scapy. If not, see <http://www.gnu.org/licenses/>.
+# See https://scapy.net/ for more information
+# Copyright (C) 2017 Arthur Gervais
+#                    Ken LE PRADO,
+#                    Sebastien Mainand
+#                    Thomas Aurel
 
 # scapy.contrib.description = ModBus Protocol
 # scapy.contrib.status = loads
 
-# Copyright (C) 2017 Arthur Gervais, Ken LE PRADO, Sébastien Mainand,
-# Thomas Aurel
 
 import struct
 
@@ -27,7 +17,6 @@ from scapy.fields import XByteField, XShortField, StrLenField, ByteEnumField, \
     BitFieldLenField, ByteField, ConditionalField, EnumField, FieldListField, \
     ShortField, StrFixedLenField, XShortEnumField
 from scapy.layers.inet import TCP
-from scapy.utils import orb
 from scapy.config import conf
 from scapy.volatile import VolatileValue
 
@@ -56,7 +45,7 @@ class ModbusPDU01ReadCoilsRequest(_ModbusPDUNoPayload):
                    XShortField("quantity", 0x0001)]
 
 
-class ModbusPDU01ReadCoilsResponse(_ModbusPDUNoPayload):
+class ModbusPDU01ReadCoilsResponse(Packet):
     name = "Read Coils Response"
     fields_desc = [XByteField("funcCode", 0x01),
                    BitFieldLenField("byteCount", None, 8,
@@ -112,7 +101,8 @@ class ModbusPDU03ReadHoldingRegistersResponse(Packet):
                                     adjust=lambda pkt, x: x * 2),
                    FieldListField("registerVal", [0x0000],
                                   ShortField("", 0x0000),
-                                  count_from=lambda pkt: pkt.byteCount)]
+                                  count_from=lambda pkt: pkt.byteCount // 2,
+                                  max_count=123)]
 
 
 class ModbusPDU03ReadHoldingRegistersError(Packet):
@@ -136,7 +126,7 @@ class ModbusPDU04ReadInputRegistersResponse(Packet):
                                     adjust=lambda pkt, x: x * 2),
                    FieldListField("registerVal", [0x0000],
                                   ShortField("", 0x0000),
-                                  count_from=lambda pkt: pkt.byteCount)]
+                                  count_from=lambda pkt: pkt.byteCount // 2)]
 
 
 class ModbusPDU04ReadInputRegistersError(Packet):
@@ -322,7 +312,7 @@ class ModbusPDU10WriteMultipleRegistersRequest(Packet):
                                     adjust=lambda pkt, x: x * 2),
                    FieldListField("outputsValue", [0x0000],
                                   XShortField("", 0x0000),
-                                  count_from=lambda pkt: pkt.byteCount)]
+                                  count_from=lambda pkt: pkt.byteCount // 2)]
 
 
 class ModbusPDU10WriteMultipleRegistersResponse(Packet):
@@ -347,12 +337,14 @@ class ModbusPDU11ReportSlaveIdResponse(Packet):
     name = "Report Slave Id Response"
     fields_desc = [
         XByteField("funcCode", 0x11),
-        BitFieldLenField("byteCount", None, 8, length_of="slaveId"),
+        # byteCount covers slaveId and runIdicatorStatus
+        BitFieldLenField("byteCount", None, 8, length_of="slaveId",
+                         adjust=lambda pkt, x: x + 1),
         ConditionalField(StrLenField("slaveId", "",
-                                     length_from=lambda pkt: pkt.byteCount),
-                         lambda pkt: pkt.byteCount > 0),
+                                     length_from=lambda pkt: pkt.byteCount - 1),
+                         lambda pkt: pkt.byteCount != 0),
         ConditionalField(XByteField("runIdicatorStatus", 0x00),
-                         lambda pkt: pkt.byteCount > 0),
+                         lambda pkt: pkt.byteCount != 0),
     ]
 
 
@@ -527,7 +519,7 @@ class ModbusPDU17ReadWriteMultipleRegistersRequest(Packet):
                                     adjust=lambda pkt, x: x * 2),
                    FieldListField("writeRegistersValue", [0x0000],
                                   XShortField("", 0x0000),
-                                  count_from=lambda pkt: pkt.byteCount)]
+                                  count_from=lambda pkt: pkt.byteCount // 2)]
 
 
 class ModbusPDU17ReadWriteMultipleRegistersResponse(Packet):
@@ -538,7 +530,7 @@ class ModbusPDU17ReadWriteMultipleRegistersResponse(Packet):
                                     adjust=lambda pkt, x: x * 2),
                    FieldListField("registerVal", [0x0000],
                                   ShortField("", 0x0000),
-                                  count_from=lambda pkt: pkt.byteCount)]
+                                  count_from=lambda pkt: pkt.byteCount // 2)]
 
 
 class ModbusPDU17ReadWriteMultipleRegistersError(Packet):
@@ -561,7 +553,7 @@ class ModbusPDU18ReadFIFOQueueResponse(Packet):
                                     adjust=lambda pkt, p: p * 2 + 2),
                    BitFieldLenField("FIFOCount", None, 16, count_of="FIFOVal"),
                    FieldListField("FIFOVal", [], ShortField("", 0x0000),
-                                  count_from=lambda pkt: pkt.byteCount)]
+                                  count_from=lambda pkt: pkt.FIFOCount)]
 
 
 class ModbusPDU18ReadFIFOQueueError(Packet):
@@ -694,7 +686,7 @@ class ModbusPDUReservedFunctionCodeRequest(_ModbusPDUNoPayload):
     name = "Reserved Function Code Request"
     fields_desc = [
         ByteEnumField("funcCode", 0x00, _reserved_funccode_request),
-        StrFixedLenField('payload', '', 255), ]
+        StrFixedLenField('mb_payload', '', 255), ]
 
     def mysummary(self):
         return self.sprintf("Modbus Reserved Request %funcCode%")
@@ -704,7 +696,7 @@ class ModbusPDUReservedFunctionCodeResponse(_ModbusPDUNoPayload):
     name = "Reserved Function Code Response"
     fields_desc = [
         ByteEnumField("funcCode", 0x00, _reserved_funccode_response),
-        StrFixedLenField('payload', '', 255), ]
+        StrFixedLenField('mb_payload', '', 255), ]
 
     def mysummary(self):
         return self.sprintf("Modbus Reserved Response %funcCode%")
@@ -714,7 +706,7 @@ class ModbusPDUReservedFunctionCodeError(_ModbusPDUNoPayload):
     name = "Reserved Function Code Error"
     fields_desc = [
         ByteEnumField("funcCode", 0x00, _reserved_funccode_error),
-        StrFixedLenField('payload', '', 255), ]
+        StrFixedLenField('mb_payload', '', 255), ]
 
     def mysummary(self):
         return self.sprintf("Modbus Reserved Error %funcCode%")
@@ -750,7 +742,7 @@ class ModbusPDUUserDefinedFunctionCodeRequest(_ModbusPDUNoPayload):
         ModbusByteEnumField(
             "funcCode", 0x00, _userdefined_funccode_request,
             "Unknown user-defined request function Code"),
-        StrFixedLenField('payload', '', 255), ]
+        StrFixedLenField('mb_payload', '', 255), ]
 
     def mysummary(self):
         return self.sprintf("Modbus User-Defined Request %funcCode%")
@@ -762,7 +754,7 @@ class ModbusPDUUserDefinedFunctionCodeResponse(_ModbusPDUNoPayload):
         ModbusByteEnumField(
             "funcCode", 0x00, _userdefined_funccode_response,
             "Unknown user-defined response function Code"),
-        StrFixedLenField('payload', '', 255), ]
+        StrFixedLenField('mb_payload', '', 255), ]
 
     def mysummary(self):
         return self.sprintf("Modbus User-Defined Response %funcCode%")
@@ -774,7 +766,7 @@ class ModbusPDUUserDefinedFunctionCodeError(_ModbusPDUNoPayload):
         ModbusByteEnumField(
             "funcCode", 0x00, _userdefined_funccode_error,
             "Unknown user-defined error function Code"),
-        StrFixedLenField('payload', '', 255), ]
+        StrFixedLenField('mb_payload', '', 255), ]
 
     def mysummary(self):
         return self.sprintf("Modbus User-Defined Error %funcCode%")
@@ -821,7 +813,7 @@ _modbus_error_classes = {
     0x87: ModbusPDU07ReadExceptionStatusError,
     0x88: ModbusPDU08DiagnosticsError,
     0x8B: ModbusPDU0BGetCommEventCounterError,
-    0x0C: ModbusPDU0CGetCommEventLogError,
+    0x8C: ModbusPDU0CGetCommEventLogError,
     0x8F: ModbusPDU0FWriteMultipleCoilsError,
     0x90: ModbusPDU10WriteMultipleRegistersError,
     0x91: ModbusPDU11ReportSlaveIdError,
@@ -840,8 +832,8 @@ _modbus_response_classes = {
     0x05: ModbusPDU05WriteSingleCoilResponse,
     0x06: ModbusPDU06WriteSingleRegisterResponse,
     0x07: ModbusPDU07ReadExceptionStatusResponse,
-    0x88: ModbusPDU08DiagnosticsResponse,
-    0x8B: ModbusPDU0BGetCommEventCounterRequest,
+    0x08: ModbusPDU08DiagnosticsResponse,
+    0x0B: ModbusPDU0BGetCommEventCounterResponse,
     0x0C: ModbusPDU0CGetCommEventLogResponse,
     0x0F: ModbusPDU0FWriteMultipleCoilsResponse,
     0x10: ModbusPDU10WriteMultipleRegistersResponse,
@@ -876,10 +868,12 @@ class ModbusADURequest(Packet):
     ]
 
     def guess_payload_class(self, payload):
-        function_code = orb(payload[0])
+        function_code = payload[0]
 
         if function_code == 0x2B:
-            sub_code = orb(payload[1])
+            if len(payload) < 2:
+                return conf.raw_layer
+            sub_code = payload[1]
             try:
                 return _mei_types_request[sub_code]
             except KeyError:
@@ -913,10 +907,12 @@ class ModbusADUResponse(Packet):
     ]
 
     def guess_payload_class(self, payload):
-        function_code = orb(payload[0])
+        function_code = payload[0]
 
         if function_code == 0x2B:
-            sub_code = orb(payload[1])
+            if len(payload) < 2:
+                return conf.raw_layer
+            sub_code = payload[1]
             try:
                 return _mei_types_response[sub_code]
             except KeyError:

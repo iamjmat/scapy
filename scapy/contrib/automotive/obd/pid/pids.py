@@ -1,15 +1,17 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # This file is part of Scapy
-# See http://www.secdev.org/projects/scapy for more information
+# See https://scapy.net/ for more information
 # Copyright (C) Andreas Korb <andreas.d.korb@gmail.com>
 # Copyright (C) Nils Weiss <nils@we155.de>
-# This program is published under a GPLv2 license
 
 # scapy.contrib.status = skip
 
 from scapy.packet import Packet, bind_layers
-from scapy.fields import PacketListField
+from scapy.fields import ConditionalField, PacketListField, XByteEnumField
 
-from scapy.contrib.automotive.obd.services import OBD_S01, OBD_S02
+from scapy.contrib.automotive.obd.services import (
+    OBD_S01, OBD_S02, _OBD_SERVICES, _obd_slm
+)
 from scapy.contrib.automotive.obd.pid.pids_00_1F import *
 from scapy.contrib.automotive.obd.pid.pids_20_3F import *
 from scapy.contrib.automotive.obd.pid.pids_40_5F import *
@@ -27,11 +29,12 @@ class OBD_S01_PR_Record(Packet):
 class OBD_S01_PR(Packet):
     name = "Parameter IDs"
     fields_desc = [
+        ConditionalField(XByteEnumField('service', 0x41, _OBD_SERVICES), _obd_slm),
         PacketListField("data_records", [], OBD_S01_PR_Record)
     ]
 
     def answers(self, other):
-        return other.__class__ == OBD_S01 \
+        return isinstance(other, OBD_S01) \
             and all(r.pid in other.pid for r in self.data_records)
 
 
@@ -45,11 +48,12 @@ class OBD_S02_PR_Record(Packet):
 class OBD_S02_PR(Packet):
     name = "Parameter IDs"
     fields_desc = [
+        ConditionalField(XByteEnumField('service', 0x42, _OBD_SERVICES), _obd_slm),
         PacketListField("data_records", [], OBD_S02_PR_Record)
     ]
 
     def answers(self, other):
-        return other.__class__ == OBD_S02 \
+        return isinstance(other, OBD_S02) \
             and all(r.pid in [o.pid for o in other.requests]
                     for r in self.data_records)
 

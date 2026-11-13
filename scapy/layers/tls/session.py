@@ -1,28 +1,89 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # This file is part of Scapy
+# See https://scapy.net/ for more information
 # Copyright (C) 2007, 2008, 2009 Arnaud Ebalard
 #               2015, 2016, 2017 Maxence Tury
 #               2019 Romain Perez
-# This program is published under a GPLv2 license
 
 """
 TLS session handler.
 """
 
+import binascii
+import collections
 import socket
 import struct
 
 from scapy.config import conf
 from scapy.compat import raw
-import scapy.modules.six as six
 from scapy.error import log_runtime, warning
 from scapy.packet import Packet
 from scapy.pton_ntop import inet_pton
-from scapy.sessions import DefaultSession
+from scapy.sessions import TCPSession
 from scapy.utils import repr_hex, strxor
 from scapy.layers.inet import TCP
+from scapy.layers.tls.cert import CertList
 from scapy.layers.tls.crypto.compression import Comp_NULL
 from scapy.layers.tls.crypto.hkdf import TLS13_HKDF
 from scapy.layers.tls.crypto.prf import PRF
+
+# Typing imports
+from typing import Dict
+
+
+def parse_nss_keys(content):
+    # type: (str) -> Dict[str, bytes]
+    """
+    Parses the content of a NSS Keys log and returns unpacked keys in a
+    dictionary.
+    """
+    # http://udn.realityripple.com/docs/Mozilla/Projects/NSS/Key_Log_Format
+    keys = collections.defaultdict(dict)
+    for line in content.splitlines():
+        if line.startswith("#"):
+            continue
+        data = line.strip().split(" ")
+        if len(data) != 3 or data[0] != data[0].upper():
+            warning("Invalid NSS Key Log Entry: %s", line.strip())
+            return {}
+
+        try:
+            client_random = binascii.unhexlify(data[1])
+        except ValueError:
+            warning("Invalid ClientRandom: %s", data[1])
+            return {}
+
+        try:
+            secret = binascii.unhexlify(data[2])
+        except ValueError:
+            warning("Invalid Secret: %s", data[2])
+            return {}
+
+        # Warn that a duplicated entry was detected. The latest one
+        # will be kept in the resulting dictionary.
+        if client_random in keys[data[0]]:
+            warning("Duplicated entry for %s !", data[0])
+
+        keys[data[0]][client_random] = secret
+    return keys
+
+
+def load_nss_keys(filename):
+    # type: (str) -> Dict[str, bytes]
+    """
+    Parses a NSS Keys log file and returns unpacked keys in a dictionary.
+    """
+    try:
+        with open(filename) as fd:
+            content = fd.read()
+    except FileNotFoundError:
+        warning("Cannot open NSS Key Log: %s", filename)
+        return {}
+    except UnicodeDecodeError as ex:
+        warning("Cannot read NSS Key Log: %s %s", filename, str(ex))
+        return {}
+    return parse_nss_keys(content)
+
 
 # Note the following import may happen inside connState.__init__()
 # in order to avoid to avoid cyclical dependencies.
@@ -319,6 +380,9 @@ class tlsSession(object):
         self.dport = dport
         self.sid = sid
 
+        # Identify duplicate sessions
+        self.firsttcp = None
+
         # Our TCP socket. None until we send (or receive) a packet.
         self.sock = None
 
@@ -354,7 +418,7 @@ class tlsSession(object):
         # Either we act as server and it has to be provided, or it is expected
         # to be sent by the server through a Certificate message.
         # The server certificate should be self.server_certs[0].
-        self.server_certs = []
+        self.server_certs = CertList([])
 
         # The server private key, as a PrivKey instance, when acting as server.
         # XXX It would be nice to be able to provide both an RSA and an ECDSA
@@ -364,7 +428,13 @@ class tlsSession(object):
         # authentication, while server_rsa_key is used only for RSAkx.)
         self.server_key = None
         self.server_rsa_key = None
+        self.server_cert_verify_valid = None
+        self.server_kx_sig_valid = None
         # self.server_ecdsa_key = None
+
+        # A dictionary containing keys extracted from a NSS Keys Log using
+        # the load_nss_keys() function.
+        self.nss_keys = None
 
         # Back in the dreadful EXPORT days, US servers were forbidden to use
         # RSA keys longer than 512 bits for RSAkx. When their usual RSA key
@@ -378,8 +448,15 @@ class tlsSession(object):
         # to provide the key associated with the first certificate.
         self.client_certs = []
         self.client_key = None
+        self.client_cert_verify_valid = None
+
+        # Common (server + client) automaton parameters
+        self.finished_valid = None
 
         # Ephemeral key exchange parameters
+
+        # The agreed-upon ephemeral key group
+        self.kx_group = None
 
         # These are the group/curve parameters, needed to hold the information
         # e.g. from receiving an SKE to sending a CKE. Usually, only one of
@@ -423,6 +500,9 @@ class tlsSession(object):
         self.pre_master_secret = None
         self.master_secret = None
 
+        # The advertised supported signature algorithms found in the ClientHello
+        # extension. (for TLS 1.2-TLS 1.3 only)
+        self.advertised_sig_algs = []
         # The agreed-upon signature algorithm (for TLS 1.2-TLS 1.3 only)
         self.selected_sig_alg = None
 
@@ -436,6 +516,7 @@ class tlsSession(object):
         self.sslv2_challenge = None
         self.sslv2_challenge_clientcert = None
         self.sslv2_key_material = None
+        self.sslv2_server_verify_valid = False
 
         # These attributes should only be used with TLS 1.3 connections.
         self.tls13_psk_secret = None
@@ -444,7 +525,9 @@ class tlsSession(object):
         self.tls13_handshake_secret = None
         self.tls13_master_secret = None
         self.tls13_derived_secrets = {}
-        self.post_handshake_auth = False
+        self.tls13_cert_req_ctxt = False
+        self.post_handshake = False  # whether handshake is done
+        self.post_handshake_auth = False  # whether "Post-Handshake Auth" is used
         self.tls13_ticket_ciphersuite = None
         self.tls13_retry = False
         self.middlebox_compatibility = False
@@ -453,6 +536,9 @@ class tlsSession(object):
         # No record layer headers, no HelloRequests, no ChangeCipherSpecs.
         self.handshake_messages = []
         self.handshake_messages_parsed = []
+
+        # Post-handshake, handshake messages for post-handshake client authentication
+        self.post_handshake_messages = []
 
         # Flag, whether we derive the secret as Extended MS or not
         self.extms = False
@@ -476,6 +562,21 @@ class tlsSession(object):
                 self.pwcs.connection_end = val
         super(tlsSession, self).__setattr__(name, val)
 
+    # Get infos from underlayer
+
+    def set_underlayer(self, _underlayer):
+        if isinstance(_underlayer, TCP):
+            tcp = _underlayer
+            self.sport = tcp.sport
+            self.dport = tcp.dport
+            try:
+                self.ipsrc = tcp.underlayer.src
+                self.ipdst = tcp.underlayer.dst
+            except AttributeError:
+                pass
+            if self.firsttcp is None:
+                self.firsttcp = tcp.seq
+
     # Mirroring
 
     def mirror(self):
@@ -488,15 +589,15 @@ class tlsSession(object):
         client and the server. In such a situation, it should be used every
         time the message being read comes from a different side than the one
         read right before, as the reading state becomes the writing state, and
-        vice versa. For instance you could do:
+        vice versa. For instance you could do::
 
-        client_hello = open('client_hello.raw').read()
-        <read other messages>
+            client_hello = open('client_hello.raw').read()
+            <read other messages>
 
-        m1 = TLS(client_hello)
-        m2 = TLS(server_hello, tls_session=m1.tls_session.mirror())
-        m3 = TLS(server_cert, tls_session=m2.tls_session)
-        m4 = TLS(client_keyexchange, tls_session=m3.tls_session.mirror())
+            m1 = TLS(client_hello)
+            m2 = TLS(server_hello, tls_session=m1.tls_session.mirror())
+            m3 = TLS(server_cert, tls_session=m2.tls_session)
+            m4 = TLS(client_keyexchange, tls_session=m3.tls_session.mirror())
         """
 
         self.ipdst, self.ipsrc = self.ipsrc, self.ipdst
@@ -545,8 +646,19 @@ class tlsSession(object):
         if conf.debug_tls:
             log_runtime.debug("TLS: master secret: %s", repr_hex(ms))
 
+    def use_nss_master_secret_if_present(self) -> bool:
+        # Load the master secret from an NSS Key dictionary
+        if not self.nss_keys or "CLIENT_RANDOM" not in self.nss_keys:
+            return False
+        if self.client_random in self.nss_keys["CLIENT_RANDOM"]:
+            self.master_secret = self.nss_keys["CLIENT_RANDOM"][self.client_random]
+            return True
+        return False
+
     def compute_ms_and_derive_keys(self):
-        self.compute_master_secret()
+        if not self.master_secret:
+            self.compute_master_secret()
+
         self.prcs.derive_keys(client_random=self.client_random,
                               server_random=self.server_random,
                               master_secret=self.master_secret)
@@ -634,6 +746,15 @@ class tlsSession(object):
                                  b"".join(self.handshake_messages))
         self.tls13_derived_secrets["early_exporter_secret"] = ees
 
+        if self.nss_keys:
+            cets_dict = self.nss_keys.get('CLIENT_EARLY_TRAFFIC_SECRET', {})
+            cets = cets_dict.get(self.client_random, cets)
+            self.tls13_derived_secrets["client_early_traffic_secret"] = cets
+
+            ees_dict = self.nss_keys.get('EARLY_EXPORTER_SECRET', {})
+            ees = ees_dict.get(self.client_random, ees)
+            self.tls13_derived_secrets["early_exporter_secret"] = ees
+
         if self.connection_end == "server":
             if self.prcs:
                 self.prcs.tls13_derive_keys(cets)
@@ -671,6 +792,15 @@ class tlsSession(object):
                                   b"".join(self.handshake_messages))
         self.tls13_derived_secrets["server_handshake_traffic_secret"] = shts
 
+        if self.nss_keys:
+            chts_dict = self.nss_keys.get('CLIENT_HANDSHAKE_TRAFFIC_SECRET', {})
+            chts = chts_dict.get(self.client_random, chts)
+            self.tls13_derived_secrets["client_handshake_traffic_secret"] = chts
+
+            shts_dict = self.nss_keys.get('SERVER_HANDSHAKE_TRAFFIC_SECRET', {})
+            shts = shts_dict.get(self.client_random, shts)
+            self.tls13_derived_secrets["server_handshake_traffic_secret"] = shts
+
     def compute_tls13_traffic_secrets(self):
         """
         Ciphers key and IV are updated accordingly for Application data.
@@ -704,6 +834,19 @@ class tlsSession(object):
                                 b"".join(self.handshake_messages))
         self.tls13_derived_secrets["exporter_secret"] = es
 
+        if self.nss_keys:
+            cts0_dict = self.nss_keys.get('CLIENT_TRAFFIC_SECRET_0', {})
+            cts0 = cts0_dict.get(self.client_random, cts0)
+            self.tls13_derived_secrets["client_traffic_secrets"] = [cts0]
+
+            sts0_dict = self.nss_keys.get('SERVER_TRAFFIC_SECRET_0', {})
+            sts0 = sts0_dict.get(self.client_random, sts0)
+            self.tls13_derived_secrets["server_traffic_secrets"] = [sts0]
+
+            es_dict = self.nss_keys.get('EXPORTER_SECRET', {})
+            es = es_dict.get(self.client_random, es)
+            self.tls13_derived_secrets["exporter_secret"] = es
+
         if self.connection_end == "server":
             # self.prcs.tls13_derive_keys(cts0)
             self.pwcs.tls13_derive_keys(sts0)
@@ -718,27 +861,50 @@ class tlsSession(object):
         elif self.connection_end == "client":
             self.pwcs.tls13_derive_keys(cts0)
 
-    def compute_tls13_verify_data(self, connection_end, read_or_write):
-        shts = "server_handshake_traffic_secret"
-        chts = "client_handshake_traffic_secret"
+    def compute_tls13_verify_data(self, connection_end, read_or_write,
+                                  handshake_context):
+        # RFC8446 - 4.4
+        # +-----------+-------------------------+-----------------------------+
+        # | Mode      | Handshake Context       | Base Key                    |
+        # +-----------+-------------------------+-----------------------------+
+        # | Server    | ClientHello ... later   | server_handshake_traffic_   |
+        # |           | of EncryptedExtensions/ | secret                      |
+        # |           | CertificateRequest      |                             |
+        # |           |                         |                             |
+        # | Client    | ClientHello ... later   | client_handshake_traffic_   |
+        # |           | of server               | secret                      |
+        # |           | Finished/EndOfEarlyData |                             |
+        # |           |                         |                             |
+        # | Post-     | ClientHello ... client  | client_application_traffic_ |
+        # | Handshake | Finished +              | secret_N                    |
+        # |           | CertificateRequest      |                             |
+        # +-----------+-------------------------+-----------------------------+
+        if self.post_handshake:
+            # RFC8446 - 4.6
+            # TLS also allows other messages to be sent after the main handshake.
+            # These messages use a handshake content type and are encrypted under
+            # the appropriate application traffic key.
+            shts = self.tls13_derived_secrets["server_traffic_secrets"][-1]
+            chts = self.tls13_derived_secrets["client_traffic_secrets"][-1]
+        else:
+            shts = self.tls13_derived_secrets["server_handshake_traffic_secret"]
+            chts = self.tls13_derived_secrets["client_handshake_traffic_secret"]
         if read_or_write == "read":
             hkdf = self.rcs.hkdf
             if connection_end == "client":
-                basekey = self.tls13_derived_secrets[shts]
+                basekey = shts
             elif connection_end == "server":
-                basekey = self.tls13_derived_secrets[chts]
+                basekey = chts
         elif read_or_write == "write":
             hkdf = self.wcs.hkdf
             if connection_end == "client":
-                basekey = self.tls13_derived_secrets[chts]
+                basekey = chts
             elif connection_end == "server":
-                basekey = self.tls13_derived_secrets[shts]
+                basekey = shts
 
         if not hkdf or not basekey:
             warning("Missing arguments for verify_data computation!")
             return None
-        # XXX this join() works in standard cases, but does it in all of them?
-        handshake_context = b"".join(self.handshake_messages)
         return hkdf.compute_verify_data(basekey, handshake_context)
 
     def compute_tls13_resumption_secret(self):
@@ -800,7 +966,7 @@ class tlsSession(object):
     def consider_read_padding(self):
         # Return True if padding is needed. Used by TLSPadField.
         return (self.rcs.cipher.type == "block" and
-                not (False in six.itervalues(self.rcs.cipher.ready)))
+                not (False in self.rcs.cipher.ready.values()))
 
     def consider_write_padding(self):
         # Return True if padding is needed. Used by TLSPadField.
@@ -843,12 +1009,19 @@ class tlsSession(object):
 
         return False
 
-    def __repr__(self):
+    def repr(self, _underlayer=None):
         sid = repr(self.sid)
         if len(sid) > 12:
             sid = sid[:11] + "..."
+        if _underlayer and _underlayer.dport != self.dport:
+            return "%s:%s > %s:%s" % (self.ipdst, str(self.dport),
+                                      self.ipsrc, str(self.sport))
         return "%s:%s > %s:%s" % (self.ipsrc, str(self.sport),
                                   self.ipdst, str(self.dport))
+
+    def __repr__(self):
+        return self.repr()
+
 
 ###############################################################################
 #   Session singleton                                                         #
@@ -886,23 +1059,27 @@ class _GenericTLSSessionInheritance(Packet):
         self.wcs_snap_init = self.tls_session.wcs.snapshot()
 
         if isinstance(_underlayer, TCP):
-            tcp = _underlayer
-            self.tls_session.sport = tcp.sport
-            self.tls_session.dport = tcp.dport
-            try:
-                self.tls_session.ipsrc = tcp.underlayer.src
-                self.tls_session.ipdst = tcp.underlayer.dst
-            except AttributeError:
-                pass
+            # Get information from _underlayer
+            self.tls_session.set_underlayer(_underlayer)
+
+            # Load a NSS Key Log file
+            if conf.tls_nss_filename is not None:
+                if conf.tls_nss_keys is None:
+                    conf.tls_nss_keys = load_nss_keys(conf.tls_nss_filename)
+
             if conf.tls_session_enable:
                 if newses:
                     s = conf.tls_sessions.find(self.tls_session)
                     if s:
+                        if conf.tls_nss_keys is not None:
+                            s.nss_keys = conf.tls_nss_keys
                         if s.dport == self.tls_session.dport:
                             self.tls_session = s
                         else:
                             self.tls_session = s.mirror()
                     else:
+                        if conf.tls_nss_keys is not None:
+                            self.tls_session.nss_keys = conf.tls_nss_keys
                         conf.tls_sessions.add(self.tls_session)
             if self.tls_session.connection_end == "server":
                 srk = conf.tls_sessions.server_rsa_key
@@ -1009,26 +1186,56 @@ class _GenericTLSSessionInheritance(Packet):
         s.rcs = rcs_snap
         s.wcs = wcs_snap
 
-    def mysummary(self):
-        return "TLS %s / %s" % (repr(self.tls_session),
-                                getattr(self, "_name", self.name))
+    def mysummary(self, first=True):
+        from scapy.layers.tls.record import TLS
+        from scapy.layers.tls.record_tls13 import TLS13
+        if (
+            self.underlayer and
+            isinstance(self.underlayer, _GenericTLSSessionInheritance)
+        ):
+            summary = getattr(self, "_name", self.name)
+        else:
+            _underlayer = None
+            if self.underlayer and isinstance(self.underlayer, TCP):
+                _underlayer = self.underlayer
+            summary = "TLS %s / %s" % (
+                self.tls_session.repr(_underlayer=_underlayer),
+                getattr(self, "_name", self.name)
+            )
+        return summary, [TLS, TLS13]
 
     @classmethod
-    def tcp_reassemble(cls, data, metadata):
-        # Used with TLSSession
+    def tcp_reassemble(cls, data, metadata, session):
+        # Used with TCPSession
         from scapy.layers.tls.record import TLS
         from scapy.layers.tls.record_tls13 import TLS13
         if cls in (TLS, TLS13):
+            if len(data) < 5:
+                return None
             length = struct.unpack("!H", data[3:5])[0] + 5
-            if len(data) == length:
-                return cls(data)
-            elif len(data) > length:
-                pkt = cls(data)
-                if hasattr(pkt.payload, "tcp_reassemble"):
-                    if pkt.payload.tcp_reassemble(data[length:], metadata):
-                        return pkt
-                else:
-                    return pkt
+            if len(data) >= length:
+                # get the underlayer as it is used to populate tls_session
+                if "original" not in metadata:
+                    return cls(data)
+                underlayer = metadata["original"][TCP].copy()
+                underlayer.remove_payload()
+                # eventually get the tls_session now for TLS.dispatch_hook
+                tls_session = None
+                if conf.tls_session_enable:
+                    s = tlsSession()
+                    s.set_underlayer(underlayer)
+                    tls_session = conf.tls_sessions.find(s)
+                    if tls_session:
+                        if tls_session.dport != underlayer.dport:
+                            tls_session = tls_session.mirror()
+                        if tls_session.firsttcp == underlayer.seq:
+                            log_runtime.info(
+                                "TLS: session %s is a duplicate of a previous "
+                                "dissection. Discard it" % repr(tls_session)
+                            )
+                            conf.tls_sessions.rem(tls_session, force=True)
+                            tls_session = None
+                return cls(data, _underlayer=underlayer, tls_session=tls_session)
         else:
             return cls(data)
 
@@ -1054,11 +1261,12 @@ class _tls_sessions(object):
         else:
             self.sessions[h] = [session]
 
-    def rem(self, session):
-        s = self.find(session)
-        if s:
-            log_runtime.info("TLS: previous session shall not be overwritten")
-            return
+    def rem(self, session, force=False):
+        if not force:
+            s = self.find(session)
+            if s:
+                log_runtime.info("TLS: previous session shall not be overwritten")
+                return
 
         h = session.hash()
         self.sessions[h].remove(session)
@@ -1071,16 +1279,16 @@ class _tls_sessions(object):
         if h in self.sessions:
             for k in self.sessions[h]:
                 if k.eq(session):
-                    if conf.tls_verbose:
+                    if conf.debug_tls:
                         log_runtime.info("TLS: found session matching %s", k)
                     return k
-        if conf.tls_verbose:
+        if conf.debug_tls:
             log_runtime.info("TLS: did not find session matching %s", session)
         return None
 
     def __repr__(self):
         res = [("First endpoint", "Second endpoint", "Session ID")]
-        for li in six.itervalues(self.sessions):
+        for li in self.sessions.values():
             for s in li:
                 src = "%s[%d]" % (s.ipsrc, s.sport)
                 dst = "%s[%d]" % (s.ipdst, s.dport)
@@ -1093,8 +1301,13 @@ class _tls_sessions(object):
         return "\n".join(map(lambda x: fmt % x, res))
 
 
-class TLSSession(DefaultSession):
+class TLSSession(TCPSession):
     def __init__(self, *args, **kwargs):
+        # XXX this doesn't bring any value.
+        warning(
+            "TLSSession is deprecated and will be removed in a future version. "
+            "Please use TCPSession instead with conf.tls_session_enable=True"
+        )
         server_rsa_key = kwargs.pop("server_rsa_key", None)
         super(TLSSession, self).__init__(*args, **kwargs)
         self._old_conf_status = conf.tls_session_enable
@@ -1107,6 +1320,5 @@ class TLSSession(DefaultSession):
         return super(TLSSession, self).toPacketList()
 
 
+# Instantiate the TLS sessions holder
 conf.tls_sessions = _tls_sessions()
-conf.tls_session_enable = False
-conf.tls_verbose = False

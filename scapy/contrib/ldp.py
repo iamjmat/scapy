@@ -1,33 +1,32 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# This file is part of Scapy
+# See https://scapy.net/ for more information
+# Copyright (C) 2010 Florian Duraffourg
+
 # scapy.contrib.description = Label Distribution Protocol (LDP)
 # scapy.contrib.status = loads
 
-# http://git.savannah.gnu.org/cgit/ldpscapy.git/snapshot/ldpscapy-5285b81d6e628043df2a83301b292f24a95f0ba1.tar.gz
+"""
+Label Distribution Protocol (LDP)
 
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+http://git.savannah.gnu.org/cgit/ldpscapy.git/snapshot/ldpscapy-5285b81d6e628043df2a83301b292f24a95f0ba1.tar.gz
 
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+"""
 
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-# Copyright (C) 2010 Florian Duraffourg
-
-from __future__ import absolute_import
 import struct
 
-from scapy.compat import orb
 from scapy.packet import Packet, bind_layers, bind_bottom_up
-from scapy.fields import BitField, IPField, IntField, ShortField, StrField, \
-    XBitField
+from scapy.fields import (
+    BitField,
+    MayEnd,
+    IPField,
+    IntField,
+    ShortField,
+    StrField,
+    XBitField,
+)
 from scapy.layers.inet import UDP
 from scapy.layers.inet import TCP
-from scapy.modules.six.moves import range
 from scapy.config import conf
 from scapy.utils import inet_aton, inet_ntoa
 
@@ -79,9 +78,9 @@ class FecTLVField(StrField):
             # if x[0] == 1:
             #   list.append('Wildcard')
             # else:
-            # mask=orb(x[8*i+3])
+            # mask=x[8*i+3]
             # add=inet_ntoa(x[8*i+4:8*i+8])
-            mask = orb(x[3])
+            mask = x[3]
             nbroctets = mask // 8
             if mask % 8:
                 nbroctets += 1
@@ -103,9 +102,10 @@ class FecTLVField(StrField):
             fec += b"\x02\x00\x01"
             # mask length
             fec += struct.pack("!B", o[1])
-            # Prefix
-            fec += inet_aton(o[0])
-            tmp_len += 8
+            # Prefix, padded to a byte boundary (RFC 5036 section 3.4.1)
+            prefix = inet_aton(o[0])[:(o[1] + 7) // 8]
+            fec += prefix
+            tmp_len += 4 + len(prefix)
         s += struct.pack("!H", tmp_len)
         s += fec
         return s
@@ -175,6 +175,8 @@ class AddressTLVField(StrField):
         return tmp_len
 
     def getfield(self, pkt, s):
+        if not s:
+            return s, []
         tmp_len = self.size(s)
         return s[tmp_len:], self.m2i(pkt, s[:tmp_len])
 
@@ -228,7 +230,7 @@ class CommonHelloTLVField(StrField):
         list = []
         v = struct.unpack("!H", x[4:6])[0]
         list.append(v)
-        flags = orb(x[6])
+        flags = x[6]
         v = (flags & 0x80) >> 7
         list.append(v)
         v = (flags & 0x40) >> 6
@@ -365,7 +367,7 @@ class LDPLabelMM(_LDP_Packet):
                    XBitField("type", 0x0400, 15),
                    ShortField("len", None),
                    IntField("id", 0),
-                   FecTLVField("fec", None),
+                   MayEnd(FecTLVField("fec", None)),
                    LabelTLVField("label", 0)]
 
 # 3.5.8. Label Request Message
@@ -400,7 +402,7 @@ class LDPLabelWM(_LDP_Packet):
                    XBitField("type", 0x0402, 15),
                    ShortField("len", None),
                    IntField("id", 0),
-                   FecTLVField("fec", None),
+                   MayEnd(FecTLVField("fec", None)),
                    LabelTLVField("label", 0)]
 
 # 3.5.11. Label Release Message
@@ -435,7 +437,7 @@ class LDP(_LDP_Packet):
 
 bind_bottom_up(TCP, LDP, sport=646)
 bind_bottom_up(TCP, LDP, dport=646)
-bind_bottom_up(TCP, UDP, sport=646)
-bind_bottom_up(TCP, UDP, dport=646)
+bind_bottom_up(UDP, LDP, sport=646)
+bind_bottom_up(UDP, LDP, dport=646)
 bind_layers(TCP, LDP, sport=646, dport=646)
 bind_layers(UDP, LDP, sport=646, dport=646)
